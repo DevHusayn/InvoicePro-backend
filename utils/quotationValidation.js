@@ -32,6 +32,7 @@ const ALLOWED_QUOTATION_FIELDS = [
     'validUntil',
     'items',
     'notes',
+    'clientAdditionalInfo',
     'terms',
     'status',
     'currency',
@@ -98,6 +99,10 @@ export function sanitizeQuotationPayload(body) {
     }
 
     data.notes = data.notes !== undefined ? sanitizePlainText(data.notes, 2000) : undefined;
+    data.clientAdditionalInfo =
+        data.clientAdditionalInfo !== undefined
+            ? sanitizePlainText(data.clientAdditionalInfo, 500)
+            : undefined;
     data.terms = data.terms !== undefined ? sanitizePlainText(data.terms, 5000) : undefined;
     data.date = data.date !== undefined ? sanitizePlainText(data.date, 32) : undefined;
     data.validUntil =

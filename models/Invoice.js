@@ -18,6 +18,7 @@ const invoiceSchema = new mongoose.Schema({
         }
     ],
     notes: String,
+    clientAdditionalInfo: String,
     status: { type: String, default: 'pending' },
     paymentMethod: {
         type: String,

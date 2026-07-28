@@ -394,6 +394,7 @@ router.post('/:id/convert', auth, requireEmailVerified, validateObjectId(), asyn
                 unit: item.unit || 'Qty',
             })),
             notes: quotation.notes || '',
+            clientAdditionalInfo: quotation.clientAdditionalInfo || '',
             status: 'pending',
             currency: quotation.currency,
             taxRate: quotation.taxRate ?? 0,

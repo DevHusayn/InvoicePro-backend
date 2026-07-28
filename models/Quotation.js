@@ -22,6 +22,7 @@ const quotationSchema = new mongoose.Schema(
             },
         ],
         notes: String,
+        clientAdditionalInfo: String,
         terms: { type: String, default: '' },
         status: { type: String, default: 'draft' },
         currency: String,

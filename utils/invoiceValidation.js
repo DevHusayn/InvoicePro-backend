@@ -28,6 +28,7 @@ const ALLOWED_INVOICE_FIELDS = [
     'dueDate',
     'items',
     'notes',
+    'clientAdditionalInfo',
     'status',
     'paymentMethod',
     'datePaid',
@@ -106,6 +107,10 @@ export function sanitizeInvoicePayload(body) {
     }
 
     data.notes = data.notes !== undefined ? sanitizePlainText(data.notes, 2000) : undefined;
+    data.clientAdditionalInfo =
+        data.clientAdditionalInfo !== undefined
+            ? sanitizePlainText(data.clientAdditionalInfo, 500)
+            : undefined;
     data.date = data.date !== undefined ? sanitizePlainText(data.date, 32) : undefined;
     data.dueDate =
         data.dueDate !== undefined
