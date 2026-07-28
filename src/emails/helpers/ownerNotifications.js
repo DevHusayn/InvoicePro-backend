@@ -1,5 +1,6 @@
 import { sendInvoiceEmailedOwnerNotification } from '../senders/invoiceEmailedOwnerNotification.js';
 import { sendInvoicePaidOwnerNotification } from '../senders/invoicePaidOwnerNotification.js';
+import { sendInvoicePartialPaymentOwnerNotification } from '../senders/invoicePartialPaymentOwnerNotification.js';
 import { sendInvoiceReminderSentOwnerNotification } from '../senders/invoiceReminderSentOwnerNotification.js';
 import { sendInvoiceReceiptSentOwnerNotification } from '../senders/invoiceReceiptSentOwnerNotification.js';
 import { sendInvoiceCancelledOwnerNotification } from '../senders/invoiceCancelledOwnerNotification.js';
@@ -60,6 +61,36 @@ export async function notifyOwnerInvoicePaid({
         });
     } catch (err) {
         logOwnerNotificationFailure('invoice-paid', err);
+    }
+}
+
+export async function notifyOwnerInvoicePartialPayment({
+    userId,
+    invoice,
+    customerName,
+    paymentAmount,
+    amountPaid,
+    balanceDue,
+    paymentMethod,
+    paymentDate,
+}) {
+    try {
+        const owner = await loadOwnerNotificationContext(userId);
+        await sendInvoicePartialPaymentOwnerNotification({
+            to: owner.to,
+            ownerName: owner.ownerName,
+            customerName,
+            invoiceNumber: invoice.invoiceNumber,
+            paymentAmount,
+            amountPaid,
+            balanceDue,
+            currency: invoice.currency || 'NGN',
+            paymentDate: paymentDate || invoice.datePaid || new Date(),
+            paymentMethod,
+            invoiceDashboardUrl: buildOwnerInvoiceUrl(invoice),
+        });
+    } catch (err) {
+        logOwnerNotificationFailure('invoice-partial-payment', err);
     }
 }
 

@@ -32,6 +32,7 @@ import {
     dispatchInvoiceEmailToClient,
     tryAutoEmailInvoice,
     dispatchPaidInvoiceEmails,
+    dispatchPartialPaymentEmails,
     dispatchOverdueInvoiceEmails,
     dispatchCancelledInvoiceEmails,
     notifyOwnerInvoiceReminderSent,
@@ -346,7 +347,7 @@ router.post('/:id/payments', auth, requireEmailVerified, validateObjectId(), asy
         });
         if (!invoice) return res.status(404).json({ message: 'Invoice not found' });
 
-        const { becamePaid } = applyInvoicePayment(invoice, req.body);
+        const { becamePaid, payment } = applyInvoicePayment(invoice, req.body);
 
         if (becamePaid) {
             const invNum = invoice.invoiceNumber;
@@ -359,6 +360,8 @@ router.post('/:id/payments', auth, requireEmailVerified, validateObjectId(), asy
 
         if (becamePaid) {
             await dispatchPaidInvoiceEmails(invoice, req.user.userId);
+        } else {
+            await dispatchPartialPaymentEmails(invoice, req.user.userId, payment);
         }
 
         res.json(invoice);

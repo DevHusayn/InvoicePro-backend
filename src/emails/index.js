@@ -17,9 +17,11 @@ export {
     sendQuotationEmailedOwnerNotification,
     sendReceiptEmail,
     sendPaymentConfirmationEmail,
+    sendPartialPaymentEmail,
     sendPaymentReminderEmail,
     sendInvoiceEmailedOwnerNotification,
     sendInvoicePaidOwnerNotification,
+    sendInvoicePartialPaymentOwnerNotification,
     sendInvoiceReminderSentOwnerNotification,
     sendInvoiceReceiptSentOwnerNotification,
     sendInvoiceCancelledClientEmail,
@@ -34,6 +36,7 @@ export {
 export {
     notifyOwnerInvoiceEmailed,
     notifyOwnerInvoicePaid,
+    notifyOwnerInvoicePartialPayment,
     notifyOwnerInvoiceReminderSent,
     notifyOwnerInvoiceReceiptSent,
     notifyOwnerInvoiceCancelled,
@@ -50,6 +53,7 @@ export {
     dispatchInvoiceEmailToClient,
     tryAutoEmailInvoice,
     dispatchPaidInvoiceEmails,
+    dispatchPartialPaymentEmails,
     dispatchOverdueInvoiceEmails,
     dispatchCancelledInvoiceEmails,
 } from './helpers/invoiceDispatch.js';

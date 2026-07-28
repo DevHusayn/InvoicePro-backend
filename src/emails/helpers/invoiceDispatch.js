@@ -1,8 +1,10 @@
+import Client from '../../../models/Client.js';
 import BusinessInfo from '../../../models/CompanyInfo.js';
 import { PAYMENT_REMINDER_COOLDOWN_MS } from '../config.js';
 import { sendInvoiceEmail } from '../senders/invoiceEmail.js';
 import { sendPaymentReminderEmail } from '../senders/paymentReminderEmail.js';
 import { sendPaymentConfirmationEmail } from '../senders/paymentConfirmationEmail.js';
+import { sendPartialPaymentEmail } from '../senders/partialPaymentEmail.js';
 import { sendInvoiceCancelledClientEmail } from '../senders/invoiceCancelledClientEmail.js';
 import {
     loadInvoiceEmailContext,
@@ -15,6 +17,7 @@ import { ensureInvoicePublicToken } from '../../../utils/invoicePublicToken.js';
 import {
     notifyOwnerInvoiceEmailed,
     notifyOwnerInvoicePaid,
+    notifyOwnerInvoicePartialPayment,
     notifyOwnerInvoiceReminderSent,
     notifyOwnerInvoiceReceiptSent,
     notifyOwnerInvoiceCancelled,
@@ -158,6 +161,64 @@ export async function dispatchPaidInvoiceEmails(invoice, userId) {
         });
     } catch (err) {
         console.error('[Waraqah Email] Paid invoice emails skipped:', err.message);
+    }
+}
+
+/**
+ * Notify client and owner when a partial installment is recorded.
+ */
+export async function dispatchPartialPaymentEmails(invoice, userId, payment) {
+    try {
+        await ensureInvoicePublicToken(invoice);
+        const amountPaid = Number(invoice.amountPaid) > 0 ? Number(invoice.amountPaid) : 0;
+        const balanceDue = Math.max(0, Number(invoice.total || 0) - amountPaid);
+        const paymentMethod = formatPaymentMethod(payment?.method || invoice.paymentMethod);
+        const paymentDate = payment?.date || invoice.datePaid || new Date();
+        const paymentAmount = Number(payment?.amount) || 0;
+
+        let customerName = 'Customer';
+        let ctx = null;
+        try {
+            ctx = await loadInvoiceEmailContext(invoice, userId);
+            customerName = ctx.customerName;
+            await sendPartialPaymentEmail({
+                to: ctx.to,
+                customerName: ctx.customerName,
+                invoiceNumber: invoice.invoiceNumber,
+                paymentAmount,
+                amountPaid,
+                balanceDue,
+                currency: invoice.currency || 'NGN',
+                paymentDate,
+                paymentMethod,
+                dueDate: invoice.dueDate,
+                invoiceUrl: buildInvoiceUrl(invoice),
+                businessName: ctx.businessName,
+                branding: ctx.branding,
+            });
+        } catch (err) {
+            if (err.status === 400) {
+                if (invoice.clientId) {
+                    const client = await Client.findOne({ _id: invoice.clientId, userId });
+                    customerName = client?.name || client?.company || customerName;
+                }
+            } else {
+                console.error('[Waraqah Email] Partial payment client email skipped:', err.message);
+            }
+        }
+
+        await notifyOwnerInvoicePartialPayment({
+            userId,
+            invoice,
+            customerName,
+            paymentAmount,
+            amountPaid,
+            balanceDue,
+            paymentMethod,
+            paymentDate,
+        });
+    } catch (err) {
+        console.error('[Waraqah Email] Partial payment emails skipped:', err.message);
     }
 }
 
