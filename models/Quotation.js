@@ -47,5 +47,8 @@ const quotationSchema = new mongoose.Schema(
 quotationSchema.index({ userId: 1, createdAt: -1 });
 quotationSchema.index({ userId: 1, status: 1, validUntil: 1 });
 quotationSchema.index({ userId: 1, status: 1, createdAt: -1 });
+quotationSchema.index({ userId: 1, clientId: 1 });
+quotationSchema.index({ userId: 1, quotationNumber: 1 });
+quotationSchema.index({ userId: 1, status: 1 });
 
 export default mongoose.model('Quotation', quotationSchema);

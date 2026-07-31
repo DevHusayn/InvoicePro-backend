@@ -13,6 +13,8 @@ import {
     PLANS,
 } from '../utils/businessInfoHelpers.js';
 import { isProduction } from '../utils/envValidation.js';
+import { optimizeBusinessAsset } from '../utils/imageOptimize.js';
+import { invalidateDashboardCache } from '../utils/dashboardStats.js';
 
 const router = express.Router();
 
@@ -58,11 +60,27 @@ router.put('/', auth, asyncHandler(async (req, res) => {
     }
     applyPremiumLogoRules(updates, existing);
 
+    const assetFields = [
+        'businessLogo',
+        'companyLogoUrl',
+        'companyLogoAvatarUrl',
+        'companyStampUrl',
+        'authorizedSignatureUrl',
+    ];
+    await Promise.all(
+        assetFields
+            .filter((field) => updates[field])
+            .map(async (field) => {
+                updates[field] = await optimizeBusinessAsset(field, updates[field]);
+            })
+    );
+
     const info = await BusinessInfo.findOneAndUpdate(
         { userId: req.user.userId },
         { $set: updates },
         { new: true, upsert: true }
     );
+    invalidateDashboardCache(req.user.userId);
     res.json(toBusinessInfoResponse(info));
 }));
 

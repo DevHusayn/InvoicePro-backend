@@ -2,8 +2,14 @@ import mongoose from 'mongoose';
 import Invoice from '../models/Invoice.js';
 import Quotation from '../models/Quotation.js';
 import Client from '../models/Client.js';
-import { syncExpiredQuotationsForUser } from './quotationExpire.js';
+import BusinessInfo from '../models/CompanyInfo.js';
 import { getDraftCountForUser } from './documentDrafts.js';
+import { getInvoiceUsageForUser } from './invoiceLimits.js';
+import { toBusinessInfoResponse } from './businessInfoHelpers.js';
+import { getCache, setCache, invalidateCache } from './cache.js';
+
+const DASHBOARD_CACHE_TTL_MS = 30_000;
+const OVERDUE_LIMIT = 20;
 
 const INVOICE_SUMMARY_FIELDS =
     'invoiceNumber receiptNumber clientId date dueDate status total amountPaid currency createdAt updatedAt';
@@ -39,20 +45,93 @@ function balanceDueOf(inv) {
     return Math.max(0, roundMoney(inv.total) - amountPaidOf(inv));
 }
 
-/** Collected cash across all invoices (uses amountPaid when present). */
-function sumCollectedRevenue(invoices) {
-    return invoices.reduce((sum, inv) => {
-        if (inv.status === 'cancelled' || inv.status === 'draft') return sum;
-        return sum + amountPaidOf(inv);
-    }, 0);
-}
+/** Revenue totals via aggregation — avoids loading every invoice into memory. */
+async function getInvoiceRevenueStats(userId) {
+    const uid = toUserObjectId(userId);
+    const rows = await Invoice.aggregate([
+        { $match: { userId: uid, status: { $ne: 'draft' } } },
+        {
+            $group: {
+                _id: null,
+                totalInvoices: { $sum: 1 },
+                paidRevenue: {
+                    $sum: {
+                        $cond: [
+                            { $in: ['$status', ['cancelled', 'draft']] },
+                            0,
+                            {
+                                $let: {
+                                    vars: {
+                                        paid: { $ifNull: ['$amountPaid', 0] },
+                                        total: { $ifNull: ['$total', 0] },
+                                    },
+                                    in: {
+                                        $cond: [
+                                            { $gt: ['$$paid', 0] },
+                                            '$$paid',
+                                            {
+                                                $cond: [
+                                                    { $eq: ['$status', 'paid'] },
+                                                    '$$total',
+                                                    0,
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                },
+                            },
+                        ],
+                    },
+                },
+                pendingRevenue: {
+                    $sum: {
+                        $cond: [
+                            { $in: ['$status', ['pending', 'partial', 'overdue']] },
+                            {
+                                $max: [
+                                    0,
+                                    {
+                                        $subtract: [
+                                            { $ifNull: ['$total', 0] },
+                                            {
+                                                $let: {
+                                                    vars: {
+                                                        paid: { $ifNull: ['$amountPaid', 0] },
+                                                        total: { $ifNull: ['$total', 0] },
+                                                    },
+                                                    in: {
+                                                        $cond: [
+                                                            { $gt: ['$$paid', 0] },
+                                                            '$$paid',
+                                                            {
+                                                                $cond: [
+                                                                    { $eq: ['$status', 'paid'] },
+                                                                    '$$total',
+                                                                    0,
+                                                                ],
+                                                            },
+                                                        ],
+                                                    },
+                                                },
+                                            },
+                                        ],
+                                    },
+                                ],
+                            },
+                            0,
+                        ],
+                    },
+                },
+            },
+        },
+    ]);
 
-/** Outstanding balances for unpaid / partial / overdue invoices. */
-function sumOutstandingRevenue(invoices) {
-    return invoices.reduce((sum, inv) => {
-        if (!['pending', 'partial', 'overdue'].includes(inv.status)) return sum;
-        return sum + balanceDueOf(inv);
-    }, 0);
+    const row = rows[0] || { totalInvoices: 0, paidRevenue: 0, pendingRevenue: 0 };
+    return {
+        totalInvoices: row.totalInvoices || 0,
+        paidRevenue: roundMoney(row.paidRevenue),
+        pendingRevenue: roundMoney(row.pendingRevenue),
+    };
 }
 
 async function attachClientNames(docs) {
@@ -78,14 +157,13 @@ async function attachClientNames(docs) {
     });
 }
 
-/** Aggregated dashboard payload — avoids loading the full invoice list on home. */
+/** Core dashboard payload — stats, recent documents, overdue alerts. */
 export async function getDashboardForUser(userId) {
-    await syncExpiredQuotationsForUser(userId);
     const uid = toUserObjectId(userId);
     const nonDraftFilter = { userId: uid, status: { $ne: 'draft' } };
 
     const [
-        statsSource,
+        revenueStats,
         recentInvoicesRaw,
         recentQuotationsRaw,
         overdueRaw,
@@ -93,7 +171,7 @@ export async function getDashboardForUser(userId) {
         totalClients,
         totalQuotations,
     ] = await Promise.all([
-        Invoice.find(nonDraftFilter).select('status total amountPaid').lean(),
+        getInvoiceRevenueStats(userId),
         Invoice.find(nonDraftFilter)
             .select(INVOICE_SUMMARY_FIELDS)
             .sort({ createdAt: -1 })
@@ -107,6 +185,7 @@ export async function getDashboardForUser(userId) {
         Invoice.find({ userId: uid, status: 'overdue' })
             .select(INVOICE_SUMMARY_FIELDS)
             .sort({ dueDate: 1 })
+            .limit(OVERDUE_LIMIT)
             .lean(),
         getDraftCountForUser(userId),
         Client.countDocuments({ userId: uid }),
@@ -133,22 +212,57 @@ export async function getDashboardForUser(userId) {
         attachClientNames(overdueRaw),
     ]);
 
-    // Keep recentInvoices for backward compatibility with older clients
     const recentInvoices = recentDocuments.filter((d) => d.documentType === 'invoice');
 
     return {
         stats: {
-            totalInvoices: statsSource.length,
+            totalInvoices: revenueStats.totalInvoices,
             totalQuotations,
             totalClients,
-            paidRevenue: sumCollectedRevenue(statsSource),
-            pendingRevenue: sumOutstandingRevenue(statsSource),
+            paidRevenue: revenueStats.paidRevenue,
+            pendingRevenue: revenueStats.pendingRevenue,
             draftCount,
         },
         recentDocuments,
         recentInvoices,
         overdueInvoices,
     };
+}
+
+/** Full aggregated dashboard with subscription and business info. */
+export async function getFullDashboardForUser(userId) {
+    const cacheKey = String(userId);
+    const cached = getCache('dashboard', cacheKey);
+    if (cached) return cached;
+
+    const uid = toUserObjectId(userId);
+
+    const [dashboard, invoiceUsage, businessDoc] = await Promise.all([
+        getDashboardForUser(userId),
+        getInvoiceUsageForUser(userId),
+        BusinessInfo.findOne({ userId: uid }).lean(),
+    ]);
+
+    const businessInfo = toBusinessInfoResponse(businessDoc, { includeAssets: false });
+
+    const result = {
+        ...dashboard,
+        invoiceUsage,
+        businessInfo,
+        subscription: {
+            plan: businessInfo?.plan || 'free',
+            premiumUntil: businessInfo?.premiumUntil || null,
+            subscriptionStatus: businessInfo?.subscriptionStatus || null,
+            subscriptionRenews: businessInfo?.subscriptionRenews || null,
+        },
+    };
+
+    setCache('dashboard', cacheKey, result, DASHBOARD_CACHE_TTL_MS);
+    return result;
+}
+
+export function invalidateDashboardCache(userId) {
+    invalidateCache('dashboard', String(userId));
 }
 
 /** Lightweight counts for app shell (sidebar draft badge). */

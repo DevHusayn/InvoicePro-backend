@@ -13,6 +13,7 @@ import draftRoutes from './routes/drafts.js';
 import clientRoutes from './routes/clients.js';
 import businessInfoRoutes from './routes/companyInfo.js';
 import productRoutes from './routes/products.js';
+import dashboardRoutes from './routes/dashboard.js';
 import paymentRoutes, { paystackWebhookHandler } from './routes/payments.js';
 import publicRoutes from './routes/publicInvoices.js';
 import cronRoutes from './routes/cron.js';
@@ -95,6 +96,7 @@ app.use('/api', csrfProtection);
 
 app.use('/api/auth', authRoutes);
 app.use('/api/payments', paymentRoutes);
+app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/invoices', invoiceRoutes);
 app.use('/api/quotations', quotationRoutes);
 app.use('/api/drafts', draftRoutes);

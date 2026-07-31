@@ -10,5 +10,6 @@ const clientSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 clientSchema.index({ userId: 1, name: 1 });
+clientSchema.index({ userId: 1, createdAt: -1 });
 
 export default mongoose.model('Client', clientSchema);
