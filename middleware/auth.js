@@ -16,7 +16,7 @@ export default asyncHandler(async function auth(req, res, next) {
         return res.status(401).json({ message: 'Invalid token' });
     }
 
-    const user = await User.findById(decoded.userId);
+    const user = await User.findById(decoded.userId).select('status').lean();
     if (!user) {
         return res.status(401).json({ message: 'User not found' });
     }

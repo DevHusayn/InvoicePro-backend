@@ -74,7 +74,9 @@ invoiceSchema.index({ userId: 1, createdAt: -1 });
 invoiceSchema.index({ userId: 1, status: 1, dueDate: 1 });
 invoiceSchema.index({ userId: 1, status: 1, createdAt: -1 });
 invoiceSchema.index({ userId: 1, clientId: 1 });
-invoiceSchema.index({ userId: 1, invoiceNumber: 1 });
+invoiceSchema.index({ userId: 1, invoiceNumber: 1 }, { unique: true, sparse: true });
 invoiceSchema.index({ userId: 1, status: 1 });
+invoiceSchema.index({ status: 1, dueDate: 1 });
+invoiceSchema.index({ isRecurring: 1, recurringEndDate: 1 });
 
 export default mongoose.model('Invoice', invoiceSchema);

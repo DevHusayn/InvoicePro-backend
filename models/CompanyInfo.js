@@ -39,4 +39,6 @@ const businessInfoSchema = new mongoose.Schema({
     autoPaymentReminders: { type: Boolean, default: true },
 }, { timestamps: true });
 
+businessInfoSchema.index({ paystackSubscriptionCode: 1 }, { sparse: true });
+
 export default mongoose.model('BusinessInfo', businessInfoSchema);

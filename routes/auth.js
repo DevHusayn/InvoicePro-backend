@@ -5,6 +5,7 @@ import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
 import BusinessInfo from '../models/CompanyInfo.js';
 import auth from '../middleware/auth.js';
+import requireAdmin from '../middleware/requireAdmin.js';
 import validateObjectId from '../middleware/validateObjectId.js';
 import {
     defaultBusinessInfoFields,
@@ -111,10 +112,8 @@ async function completeAuthSession(res, user) {
 }
 
 // Admin: Suspend/Activate user
-router.patch('/admin/users/:id/status', auth, validateObjectId(), async (req, res) => {
+router.patch('/admin/users/:id/status', auth, requireAdmin, validateObjectId(), async (req, res) => {
     try {
-        const adminUser = await User.findById(req.user.userId);
-        if (!adminUser || !adminUser.isAdmin) return res.status(403).json({ message: 'Forbidden: Admins only' });
         if (req.user.userId === req.params.id) return res.status(400).json({ message: 'You cannot change your own status.' });
         const user = await User.findById(req.params.id);
         if (!user) return res.status(404).json({ message: 'User not found' });
@@ -131,10 +130,8 @@ router.patch('/admin/users/:id/status', auth, validateObjectId(), async (req, re
 });
 
 // Admin: Promote/Demote user
-router.patch('/admin/users/:id/admin', auth, validateObjectId(), async (req, res) => {
+router.patch('/admin/users/:id/admin', auth, requireAdmin, validateObjectId(), async (req, res) => {
     try {
-        const adminUser = await User.findById(req.user.userId);
-        if (!adminUser || !adminUser.isAdmin) return res.status(403).json({ message: 'Forbidden: Admins only' });
         if (req.user.userId === req.params.id) return res.status(400).json({ message: 'You cannot change your own admin status.' });
         const user = await User.findById(req.params.id);
         if (!user) return res.status(404).json({ message: 'User not found' });
@@ -147,10 +144,8 @@ router.patch('/admin/users/:id/admin', auth, validateObjectId(), async (req, res
 });
 
 // Admin: Delete user
-router.delete('/admin/users/:id', auth, validateObjectId(), async (req, res) => {
+router.delete('/admin/users/:id', auth, requireAdmin, validateObjectId(), async (req, res) => {
     try {
-        const adminUser = await User.findById(req.user.userId);
-        if (!adminUser || !adminUser.isAdmin) return res.status(403).json({ message: 'Forbidden: Admins only' });
         if (req.user.userId === req.params.id) return res.status(400).json({ message: 'You cannot delete yourself.' });
         const user = await User.findByIdAndDelete(req.params.id);
         if (!user) return res.status(404).json({ message: 'User not found' });
@@ -164,13 +159,8 @@ router.delete('/admin/users/:id', auth, validateObjectId(), async (req, res) => 
     }
 });
 
-router.get('/admin/users', auth, async (req, res) => {
+router.get('/admin/users', auth, requireAdmin, async (req, res) => {
     try {
-        const adminUser = await User.findById(req.user.userId);
-        if (!adminUser || !adminUser.isAdmin) {
-            return res.status(403).json({ message: 'Forbidden: Admins only' });
-        }
-
         const { page, limit, skip } = parsePagination(req);
         const search = String(req.query.search || '').trim();
         const filter = {};
@@ -637,12 +627,8 @@ router.post('/google', loginLimiter, async (req, res) => {
 
 
 // Admin: set user plan (free | premium)
-router.patch('/admin/users/:id/plan', auth, validateObjectId(), async (req, res) => {
+router.patch('/admin/users/:id/plan', auth, requireAdmin, validateObjectId(), async (req, res) => {
     try {
-        const adminUser = await User.findById(req.user.userId);
-        if (!adminUser || !adminUser.isAdmin) {
-            return res.status(403).json({ message: 'Forbidden: Admins only' });
-        }
         const { plan } = req.body;
         if (![PLANS.FREE, PLANS.PREMIUM].includes(plan)) {
             return res.status(400).json({ message: 'Plan must be "free" or "premium"' });
@@ -674,10 +660,8 @@ router.patch('/admin/users/:id/plan', auth, validateObjectId(), async (req, res)
 });
 
 // Admin unlock user
-router.patch('/admin/users/:id/unlock', auth, validateObjectId(), async (req, res) => {
+router.patch('/admin/users/:id/unlock', auth, requireAdmin, validateObjectId(), async (req, res) => {
     try {
-        const adminUser = await User.findById(req.user.userId);
-        if (!adminUser || !adminUser.isAdmin) return res.status(403).json({ message: 'Forbidden: Admins only' });
         const user = await User.findById(req.params.id);
         if (!user) return res.status(404).json({ message: 'User not found' });
         user.failedLoginAttempts = 0;
@@ -690,12 +674,8 @@ router.patch('/admin/users/:id/unlock', auth, validateObjectId(), async (req, re
 });
 
 // Admin: reset free-plan monthly invoice quota (5 invoices)
-router.patch('/admin/users/:id/invoice-usage/reset', auth, validateObjectId(), async (req, res) => {
+router.patch('/admin/users/:id/invoice-usage/reset', auth, requireAdmin, validateObjectId(), async (req, res) => {
     try {
-        const adminUser = await User.findById(req.user.userId);
-        if (!adminUser || !adminUser.isAdmin) {
-            return res.status(403).json({ message: 'Forbidden: Admins only' });
-        }
         const user = await User.findById(req.params.id);
         if (!user) return res.status(404).json({ message: 'User not found' });
 

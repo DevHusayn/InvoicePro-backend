@@ -1,5 +1,6 @@
 import express from 'express';
 import { sendDuePaymentReminders } from '../paymentReminderAutomation.js';
+import { generateRecurringInvoices } from '../utils/recurringInvoices.js';
 import { syncAllOverdueInvoices } from '../utils/invoiceOverdue.js';
 import { syncAllExpiredQuotations } from '../utils/quotationExpire.js';
 import asyncHandler from '../middleware/asyncHandler.js';
@@ -36,6 +37,12 @@ router.get('/overdue-sync', verifyCronSecret, asyncHandler(async (req, res) => {
 router.get('/expire-quotations', verifyCronSecret, asyncHandler(async (req, res) => {
     const { modifiedCount } = await syncAllExpiredQuotations();
     res.json({ ok: true, message: 'Expired quotations synced.', modifiedCount });
+}));
+
+/** Vercel Cron — generate invoices from active recurring templates. */
+router.get('/recurring-invoices', verifyCronSecret, asyncHandler(async (req, res) => {
+    const { createdCount } = await generateRecurringInvoices();
+    res.json({ ok: true, message: 'Recurring invoices processed.', createdCount });
 }));
 
 export default router;

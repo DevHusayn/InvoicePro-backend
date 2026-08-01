@@ -65,6 +65,7 @@ async function connectDB() {
     await mongoose.connect(MONGO_URI, {
         serverSelectionTimeoutMS: 8000,
         socketTimeoutMS: 45000,
+        maxPoolSize: process.env.VERCEL === '1' ? 10 : 50,
     });
     dbReady = true;
     console.log('MongoDB connected');
@@ -114,7 +115,7 @@ app.use(errorHandler);
 if (process.env.VERCEL !== '1') {
     connectDB()
         .then(() => import('./recurringAutomation.js'))
-        .then(() => import('./paymentReminderAutomation.js'))
+        .then(() => import('./paymentReminderCron.js'))
         .catch((err) => console.error('Startup error:', err));
 
     app.listen(PORT, () => {

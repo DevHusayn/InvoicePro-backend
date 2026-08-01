@@ -14,4 +14,6 @@ const paymentSchema = new mongoose.Schema({
     paidAt: { type: Date, default: null },
 }, { timestamps: true });
 
+paymentSchema.index({ paystackSubscriptionCode: 1 }, { sparse: true });
+
 export default mongoose.model('Payment', paymentSchema);

@@ -1,4 +1,3 @@
-import cron from 'node-cron';
 import Invoice from './models/Invoice.js';
 import BusinessInfo from './models/CompanyInfo.js';
 import {
@@ -16,82 +15,101 @@ import { getInvoiceBalanceDue } from './utils/invoicePayments.js';
 
 /** Send reminders for invoices due within 7 days or already overdue. */
 const REMINDER_WINDOW_DAYS = 7;
+const BATCH_SIZE = 50;
 
-async function sendDuePaymentReminders() {
+function reminderWindowEndDateString() {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const windowEnd = new Date(today);
     windowEnd.setDate(windowEnd.getDate() + REMINDER_WINDOW_DAYS);
-
-    const candidates = await Invoice.find({
-        status: { $in: ['pending', 'partial', 'overdue'] },
-        dueDate: { $exists: true, $ne: '' },
-        clientId: { $ne: null },
-    });
-
-    const userIds = [...new Set(candidates.map((invoice) => String(invoice.userId)))];
-    const businessRows = userIds.length
-        ? await BusinessInfo.find({ userId: { $in: userIds } })
-            .select('userId autoPaymentReminders')
-            .lean()
-        : [];
-    const autoRemindersByUser = new Map(
-        businessRows.map((row) => [String(row.userId), row.autoPaymentReminders !== false]),
-    );
-
-    for (const invoice of candidates) {
-        if (autoRemindersByUser.get(String(invoice.userId)) === false) continue;
-        const daysUntilDue = computeDaysUntilDue(invoice.dueDate);
-        const isDueSoon = daysUntilDue <= REMINDER_WINDOW_DAYS;
-        if (!isDueSoon) continue;
-
-        const lastReminder = invoice.lastPaymentReminderAt?.getTime() || 0;
-        if (Date.now() - lastReminder < PAYMENT_REMINDER_COOLDOWN_MS) continue;
-
-        try {
-            await ensureInvoicePublicToken(invoice);
-            const ctx = await loadInvoiceEmailContext(invoice, invoice.userId);
-
-            await sendPaymentReminderEmail({
-                to: ctx.to,
-                customerName: ctx.customerName,
-                invoiceNumber: invoice.invoiceNumber,
-                amountOutstanding: getInvoiceBalanceDue(invoice),
-                currency: invoice.currency || 'NGN',
-                dueDate: invoice.dueDate,
-                daysUntilDue,
-                invoiceUrl: buildInvoiceUrl(invoice),
-                businessName: ctx.businessName,
-                branding: ctx.branding,
-            });
-
-            invoice.lastPaymentReminderAt = new Date();
-            await invoice.save();
-
-            await notifyOwnerInvoiceReminderSent({
-                userId: invoice.userId,
-                invoice,
-                clientEmail: ctx.to,
-                customerName: ctx.customerName,
-                daysUntilDue,
-                automated: true,
-            });
-        } catch (err) {
-            console.error('[Waraqah Email] Automated payment reminder failed:', {
-                invoiceId: invoice._id,
-                message: err.message,
-            });
-        }
-    }
+    return windowEnd.toISOString().slice(0, 10);
 }
 
-cron.schedule('0 9 * * *', async () => {
-    try {
-        await sendDuePaymentReminders();
-        console.log('[Waraqah Email] Payment reminder automation ran.');
-    } catch (err) {
-        console.error('[Waraqah Email] Payment reminder automation error:', err);
+async function sendDuePaymentReminders() {
+    const windowEndStr = reminderWindowEndDateString();
+    const cooldownCutoff = new Date(Date.now() - PAYMENT_REMINDER_COOLDOWN_MS);
+
+    const baseFilter = {
+        status: { $in: ['pending', 'partial', 'overdue'] },
+        dueDate: { $exists: true, $ne: '', $lte: windowEndStr },
+        clientId: { $ne: null },
+        $or: [
+            { lastPaymentReminderAt: null },
+            { lastPaymentReminderAt: { $lt: cooldownCutoff } },
+        ],
+    };
+
+    let lastId = null;
+    let processed = 0;
+
+    while (true) {
+        const batchFilter = { ...baseFilter };
+        if (lastId) {
+            batchFilter._id = { $gt: lastId };
+        }
+
+        const candidates = await Invoice.find(batchFilter)
+            .sort({ _id: 1 })
+            .limit(BATCH_SIZE);
+
+        if (candidates.length === 0) break;
+        lastId = candidates[candidates.length - 1]._id;
+
+        const userIds = [...new Set(candidates.map((invoice) => String(invoice.userId)))];
+        const businessRows = await BusinessInfo.find({ userId: { $in: userIds } })
+            .select('userId autoPaymentReminders')
+            .lean();
+        const autoRemindersByUser = new Map(
+            businessRows.map((row) => [String(row.userId), row.autoPaymentReminders !== false]),
+        );
+
+        for (const invoice of candidates) {
+            if (autoRemindersByUser.get(String(invoice.userId)) === false) continue;
+
+            const daysUntilDue = computeDaysUntilDue(invoice.dueDate);
+            if (daysUntilDue > REMINDER_WINDOW_DAYS) continue;
+
+            try {
+                await ensureInvoicePublicToken(invoice);
+                const ctx = await loadInvoiceEmailContext(invoice, invoice.userId);
+
+                await sendPaymentReminderEmail({
+                    to: ctx.to,
+                    customerName: ctx.customerName,
+                    invoiceNumber: invoice.invoiceNumber,
+                    amountOutstanding: getInvoiceBalanceDue(invoice),
+                    currency: invoice.currency || 'NGN',
+                    dueDate: invoice.dueDate,
+                    daysUntilDue,
+                    invoiceUrl: buildInvoiceUrl(invoice),
+                    businessName: ctx.businessName,
+                    branding: ctx.branding,
+                });
+
+                invoice.lastPaymentReminderAt = new Date();
+                await invoice.save();
+
+                await notifyOwnerInvoiceReminderSent({
+                    userId: invoice.userId,
+                    invoice,
+                    clientEmail: ctx.to,
+                    customerName: ctx.customerName,
+                    daysUntilDue,
+                    automated: true,
+                });
+                processed += 1;
+            } catch (err) {
+                console.error('[Waraqah Email] Automated payment reminder failed:', {
+                    invoiceId: invoice._id,
+                    message: err.message,
+                });
+            }
+        }
+
+        if (candidates.length < BATCH_SIZE) break;
     }
-});
+
+    return { processed };
+}
 
 export { sendDuePaymentReminders };

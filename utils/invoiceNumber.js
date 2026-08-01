@@ -1,4 +1,5 @@
 import Invoice from '../models/Invoice.js';
+import { incrementDocumentSequence } from './documentCounter.js';
 
 const INV_PREFIX = 'INV';
 const RCP_PREFIX = 'RCP';
@@ -19,14 +20,9 @@ export function receiptFromInvoiceNumber(invoiceNumber) {
     return `${RCP_PREFIX}-${String(invoiceNumber).replace(/\D/g, '') || '0001'}`.slice(0, 20);
 }
 
-/**
- * Next sequential number per user: INV-0001, INV-0002, …
- * Uses the highest sequence from both invoice and receipt numbers.
- */
-export async function getNextInvoiceNumber(userId) {
+async function seedInvoiceSequenceMax(userId) {
     const invoices = await Invoice.find({ userId }).select('invoiceNumber receiptNumber').lean();
     let max = 0;
-
     for (const inv of invoices) {
         max = Math.max(
             max,
@@ -34,8 +30,15 @@ export async function getNextInvoiceNumber(userId) {
             extractDocumentSequence(inv.receiptNumber)
         );
     }
+    return max;
+}
 
-    const next = max + 1;
+/**
+ * Next sequential number per user: INV-0001, INV-0002, …
+ * Uses an atomic counter seeded from existing invoice/receipt numbers.
+ */
+export async function getNextInvoiceNumber(userId) {
+    const next = await incrementDocumentSequence(userId, 'invoiceSeq', seedInvoiceSequenceMax);
     return `${INV_PREFIX}-${String(next).padStart(4, '0')}`;
 }
 

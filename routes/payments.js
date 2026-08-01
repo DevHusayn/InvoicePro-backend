@@ -72,8 +72,11 @@ function renewalMessage(interval) {
 
 async function disablePreviousMonthlySubscription(userId) {
     const info = await BusinessInfo.findOne({ userId });
+    if (!info?.paystackSubscriptionCode) {
+        return;
+    }
     const isMonthlySub = !info.billingInterval || info.billingInterval === 'monthly';
-    if (!info?.paystackSubscriptionCode || !isMonthlySub) {
+    if (!isMonthlySub) {
         return;
     }
 
@@ -271,8 +274,11 @@ router.post('/initialize', auth, requireEmailVerified, async (req, res) => {
                 return res.status(400).json({ message: 'Switch is only available for yearly billing' });
             }
             const info = await BusinessInfo.findOne({ userId: user._id });
+            if (!info?.paystackSubscriptionCode) {
+                return res.status(400).json({ message: 'No active monthly subscription to switch from' });
+            }
             const isMonthlySub = !info.billingInterval || info.billingInterval === 'monthly';
-            if (!info?.paystackSubscriptionCode || !isMonthlySub) {
+            if (!isMonthlySub) {
                 return res.status(400).json({ message: 'No active monthly subscription to switch from' });
             }
             if (info.subscriptionStatus !== 'active') {

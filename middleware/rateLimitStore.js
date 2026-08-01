@@ -44,28 +44,35 @@ export class MongoRateLimitStore {
     async increment(key) {
         await ensureTtlIndex();
         const docKey = this._docKey(key);
-        const now = Date.now();
-        const existing = await RateLimitEntry.findOne({ key: docKey });
+        const now = new Date();
+        const resetTime = new Date(Date.now() + this.windowMs);
 
-        if (!existing || existing.resetTime.getTime() <= now) {
-            const resetTime = new Date(now + this.windowMs);
-            await RateLimitEntry.findOneAndUpdate(
-                { key: docKey },
-                { $set: { hits: 1, resetTime } },
-                { upsert: true, new: true }
-            );
-            return { totalHits: 1, resetTime };
-        }
-
-        const updated = await RateLimitEntry.findOneAndUpdate(
+        const doc = await RateLimitEntry.findOneAndUpdate(
             { key: docKey },
-            { $inc: { hits: 1 } },
-            { new: true }
+            [
+                {
+                    $set: {
+                        hits: {
+                            $cond: {
+                                if: { $gt: ['$resetTime', now] },
+                                then: { $add: [{ $ifNull: ['$hits', 0] }, 1] },
+                                else: 1,
+                            },
+                        },
+                        resetTime: {
+                            $cond: {
+                                if: { $gt: ['$resetTime', now] },
+                                then: '$resetTime',
+                                else: resetTime,
+                            },
+                        },
+                    },
+                },
+            ],
+            { upsert: true, new: true }
         );
-        return {
-            totalHits: updated.hits,
-            resetTime: updated.resetTime,
-        };
+
+        return { totalHits: doc.hits, resetTime: doc.resetTime };
     }
 
     async decrement(key) {
@@ -81,6 +88,5 @@ export class MongoRateLimitStore {
 }
 
 export function createMongoStore() {
-    const store = new MongoRateLimitStore();
-    return store;
+    return new MongoRateLimitStore();
 }

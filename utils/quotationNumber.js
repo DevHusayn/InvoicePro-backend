@@ -1,4 +1,5 @@
 import Quotation from '../models/Quotation.js';
+import { incrementDocumentSequence } from './documentCounter.js';
 
 const QTN_PREFIX = 'QTN';
 
@@ -8,18 +9,20 @@ export function extractQuotationSequence(raw) {
     return match ? parseInt(match[1], 10) : 0;
 }
 
+async function seedQuotationSequenceMax(userId) {
+    const quotations = await Quotation.find({ userId }).select('quotationNumber').lean();
+    let max = 0;
+    for (const q of quotations) {
+        max = Math.max(max, extractQuotationSequence(q.quotationNumber));
+    }
+    return max;
+}
+
 /**
  * Next sequential quotation number per user: QTN-0001, QTN-0002, …
  */
 export async function getNextQuotationNumber(userId) {
-    const quotations = await Quotation.find({ userId }).select('quotationNumber').lean();
-    let max = 0;
-
-    for (const q of quotations) {
-        max = Math.max(max, extractQuotationSequence(q.quotationNumber));
-    }
-
-    const next = max + 1;
+    const next = await incrementDocumentSequence(userId, 'quotationSeq', seedQuotationSequenceMax);
     return `${QTN_PREFIX}-${String(next).padStart(4, '0')}`;
 }
 
