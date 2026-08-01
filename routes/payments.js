@@ -21,7 +21,7 @@ import {
 } from '../services/paystack.js';
 import { getOrCreatePremiumPlanCode } from '../services/paystackPlan.js';
 import { activatePremiumForUser, deactivatePremiumSubscription } from '../services/premiumActivation.js';
-import { toBusinessInfoResponse } from '../utils/businessInfoHelpers.js';
+import { toBusinessInfoResponse, isPremiumActive } from '../utils/businessInfoHelpers.js';
 import { isOriginAllowed } from '../utils/corsConfig.js';
 import {
     notifyPremiumUpgradeSuccess,
@@ -33,6 +33,7 @@ import {
     paginateFind,
     buildPaginationMeta,
 } from '../utils/pagination.js';
+import { paymentVerificationLimiter } from '../middleware/rateLimits.js';
 
 const router = express.Router();
 
@@ -180,8 +181,8 @@ async function renewBySubscriptionCode(subscriptionCode, paystackData) {
     await recordSubscriptionCharge(info.userId, paystackData, billingInterval);
 }
 
-/** Public pricing info */
-router.get('/plan', auth, async (req, res) => {
+/** Public pricing info + subscription status (used by upgrade flow) */
+router.get('/plan', auth, paymentVerificationLimiter, async (req, res) => {
     try {
         const info = await BusinessInfo.findOne({ userId: req.user.userId });
         const secretKey = process.env.PAYSTACK_SECRET_KEY || '';
@@ -331,18 +332,43 @@ router.post('/initialize', auth, requireEmailVerified, async (req, res) => {
     }
 });
 
-/** Verify after Paystack redirect */
-router.get('/verify/:reference', auth, async (req, res) => {
+/** Verify after Paystack redirect — checks local DB before calling Paystack */
+router.get('/verify/:reference', auth, paymentVerificationLimiter, async (req, res) => {
     try {
+        const reference = req.params.reference;
         const payment = await Payment.findOne({
-            reference: req.params.reference,
+            reference,
             userId: req.user.userId,
         });
         if (!payment) {
             return res.status(404).json({ message: 'Payment not found' });
         }
 
-        const data = await verifyTransaction(req.params.reference);
+        let businessInfo = await BusinessInfo.findOne({ userId: req.user.userId });
+        const billingInterval = normalizeBillingInterval(payment.billingInterval || 'monthly');
+
+        if (payment.status === 'success') {
+            return res.json({
+                message: renewalMessage(billingInterval),
+                businessInfo: toBusinessInfoResponse(businessInfo),
+                alreadyVerified: true,
+            });
+        }
+
+        // Webhook may have activated Premium before this verify call runs.
+        if (payment.status === 'pending' && isPremiumActive(businessInfo)) {
+            payment.status = 'success';
+            payment.paidAt = payment.paidAt || new Date();
+            await payment.save();
+
+            return res.json({
+                message: renewalMessage(billingInterval),
+                businessInfo: toBusinessInfoResponse(businessInfo),
+                alreadyVerified: true,
+            });
+        }
+
+        const data = await verifyTransaction(reference);
         if (data.status !== 'success') {
             payment.status = 'failed';
             await payment.save();
@@ -354,7 +380,6 @@ router.get('/verify/:reference', auth, async (req, res) => {
 
         await fulfillPremiumPayment(payment, data);
 
-        const billingInterval = normalizeBillingInterval(payment.billingInterval || 'monthly');
         const months = monthsForInterval(billingInterval);
 
         if (data.subscription?.subscription_code) {
@@ -370,7 +395,7 @@ router.get('/verify/:reference', auth, async (req, res) => {
             });
         }
 
-        const businessInfo = await BusinessInfo.findOne({ userId: req.user.userId });
+        businessInfo = await BusinessInfo.findOne({ userId: req.user.userId });
 
         res.json({
             message: renewalMessage(billingInterval),

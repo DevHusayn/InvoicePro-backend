@@ -19,7 +19,7 @@ import publicRoutes from './routes/publicInvoices.js';
 import cronRoutes from './routes/cron.js';
 import { buildCorsOptions } from './utils/corsConfig.js';
 import { assertEnvOrExit } from './utils/envValidation.js';
-import { globalApiLimiter, webhookLimiter } from './middleware/rateLimits.js';
+import { readApiLimiter, writeApiLimiter } from './middleware/rateLimits.js';
 import csrfProtection from './middleware/csrf.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 
@@ -38,7 +38,6 @@ app.use(hpp());
 
 app.post(
     '/api/payments/webhook',
-    webhookLimiter,
     express.raw({ type: 'application/json' }),
     paystackWebhookHandler
 );
@@ -88,7 +87,8 @@ app.use(async (req, res, next) => {
     }
 });
 
-app.use('/api', globalApiLimiter);
+app.use('/api', readApiLimiter);
+app.use('/api', writeApiLimiter);
 
 app.use('/api/public', publicRoutes);
 app.use('/api/cron', cronRoutes);
