@@ -49,8 +49,29 @@ import {
 import {
     parsePagination,
     buildPaginationMeta,
-    escapeRegex,
+    paginateFind,
 } from '../utils/pagination.js';
+import Quotation from '../models/Quotation.js';
+import Product from '../models/Product.js';
+import Payment from '../models/Payment.js';
+import AdminNote from '../models/AdminNote.js';
+import { buildUserTimeline, buildSubscriptionHistory } from '../utils/adminUserTimeline.js';
+import {
+    parseAdminUserFilters,
+    buildAdminUserFilter,
+    buildAdminUserFilterSlug,
+} from '../utils/adminUserFilters.js';
+import {
+    enrichAdminUsers,
+    adminUsersToCsv,
+    ADMIN_USER_EXPORT_MAX,
+} from '../utils/adminUserExport.js';
+import {
+    logUserLogin,
+    logUserSuspended,
+    logUserReactivated,
+    logPlanChange,
+} from '../utils/userActivityLog.js';
 
 const router = express.Router();
 
@@ -100,6 +121,7 @@ async function completeAuthSession(res, user) {
     user.lockUntil = undefined;
     user.lastLogin = new Date();
     await user.save();
+    await logUserLogin(user._id);
 
     const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, { expiresIn: JWT_EXPIRY });
     const csrfToken = setAuthCookies(res, token);
@@ -122,6 +144,9 @@ router.patch('/admin/users/:id/status', auth, requireAdmin, validateObjectId(), 
         await user.save();
         if (wasActive) {
             await notifyAccountSuspended(user);
+            await logUserSuspended(user._id, req.user.userId);
+        } else {
+            await logUserReactivated(user._id, req.user.userId);
         }
         res.json({ message: 'User status updated', status: user.status });
     } catch (err) {
@@ -162,12 +187,8 @@ router.delete('/admin/users/:id', auth, requireAdmin, validateObjectId(), async 
 router.get('/admin/users', auth, requireAdmin, async (req, res) => {
     try {
         const { page, limit, skip } = parsePagination(req);
-        const search = String(req.query.search || '').trim();
-        const filter = {};
-        if (search) {
-            const regex = new RegExp(escapeRegex(search), 'i');
-            filter.$or = [{ email: regex }, { name: regex }];
-        }
+        const filters = parseAdminUserFilters(req.query);
+        const filter = await buildAdminUserFilter(filters);
 
         const [users, total, totalUsers, premiumCount, suspendedCount] = await Promise.all([
             User.find(filter, '-password').sort({ createdAt: -1 }).skip(skip).limit(limit),
@@ -177,36 +198,7 @@ router.get('/admin/users', auth, requireAdmin, async (req, res) => {
             User.countDocuments({ status: 'suspended' }),
         ]);
 
-        const userIds = users.map((u) => u._id);
-        const [businessInfos, invoiceCounts, clientCounts, invoiceUsageByUser] = await Promise.all([
-            BusinessInfo.find({ userId: { $in: userIds } }),
-            Invoice.aggregate([
-                { $match: { userId: { $in: userIds } } },
-                { $group: { _id: '$userId', count: { $sum: 1 } } },
-            ]),
-            Client.aggregate([
-                { $match: { userId: { $in: userIds } } },
-                { $group: { _id: '$userId', count: { $sum: 1 } } },
-            ]),
-            getInvoiceUsageMapForUsers(userIds),
-        ]);
-
-        const usersWithDetails = users.map((user) => {
-            const businessInfo =
-                businessInfos.find((bi) => bi.userId.toString() === user._id.toString()) || null;
-            const invoiceCount =
-                invoiceCounts.find((ic) => ic._id.toString() === user._id.toString())?.count || 0;
-            const clientCount =
-                clientCounts.find((cc) => cc._id.toString() === user._id.toString())?.count || 0;
-            const invoiceUsage = invoiceUsageByUser.get(user._id.toString());
-            return {
-                ...user.toObject(),
-                businessInfo,
-                invoiceCount,
-                clientCount,
-                invoiceUsage,
-            };
-        });
+        const usersWithDetails = await enrichAdminUsers(users);
         res.json({
             data: usersWithDetails,
             pagination: buildPaginationMeta(page, limit, total),
@@ -216,6 +208,34 @@ router.get('/admin/users', auth, requireAdmin, async (req, res) => {
                 suspended: suspendedCount,
             },
         });
+    } catch (err) {
+        return sendServerError(res, err);
+    }
+});
+
+router.get('/admin/users/export', auth, requireAdmin, async (req, res) => {
+    try {
+        const filters = parseAdminUserFilters(req.query);
+        const filter = await buildAdminUserFilter(filters);
+        const total = await User.countDocuments(filter);
+
+        if (total > ADMIN_USER_EXPORT_MAX) {
+            return res.status(400).json({
+                message: `Export limited to ${ADMIN_USER_EXPORT_MAX} users. Refine your filters and try again.`,
+            });
+        }
+
+        const users = await User.find(filter, '-password').sort({ createdAt: -1 }).limit(ADMIN_USER_EXPORT_MAX);
+        const usersWithDetails = await enrichAdminUsers(users);
+        const csv = adminUsersToCsv(usersWithDetails);
+        const slug = buildAdminUserFilterSlug(filters);
+        const date = new Date().toISOString().slice(0, 10);
+        const filename = `waraqah-users-${slug}-${date}.csv`;
+
+        res.set('Cache-Control', 'no-store');
+        res.set('Content-Type', 'text/csv; charset=utf-8');
+        res.set('Content-Disposition', `attachment; filename="${filename}"`);
+        res.send(`\uFEFF${csv}`);
     } catch (err) {
         return sendServerError(res, err);
     }
@@ -634,6 +654,7 @@ router.patch('/admin/users/:id/plan', auth, requireAdmin, validateObjectId(), as
             return res.status(400).json({ message: 'Plan must be "free" or "premium"' });
         }
         let info = await BusinessInfo.findOne({ userId: req.params.id });
+        const previousPlan = info?.plan || PLANS.FREE;
         if (!info) {
             info = await BusinessInfo.create({
                 userId: req.params.id,
@@ -652,6 +673,13 @@ router.patch('/admin/users/:id/plan', auth, requireAdmin, validateObjectId(), as
                 info.businessLogo = '';
             }
             await info.save();
+        }
+        if (previousPlan !== plan) {
+            await logPlanChange(req.params.id, {
+                fromPlan: previousPlan,
+                toPlan: plan,
+                actorId: req.user.userId,
+            });
         }
         res.json({ message: 'Plan updated', businessInfo: toBusinessInfoResponse(info) });
     } catch (err) {
@@ -688,6 +716,243 @@ router.patch('/admin/users/:id/invoice-usage/reset', auth, requireAdmin, validat
         if (err.status === 400) {
             return res.status(400).json({ message: err.message });
         }
+        return sendServerError(res, err);
+    }
+});
+
+function formatAdminPayment(payment) {
+    return {
+        id: String(payment._id),
+        reference: payment.reference,
+        amount: payment.amount / 100,
+        currency: payment.currency || 'NGN',
+        status: payment.status,
+        type: payment.type,
+        billingInterval: payment.billingInterval || null,
+        channel: payment.channel || '',
+        paidAt: payment.paidAt,
+        createdAt: payment.createdAt,
+    };
+}
+
+// Admin: single user profile (fresh on each load)
+router.get('/admin/users/:id', auth, requireAdmin, validateObjectId(), async (req, res) => {
+    try {
+        const user = await User.findById(req.params.id, '-password').lean();
+        if (!user) return res.status(404).json({ message: 'User not found' });
+
+        const userId = user._id;
+        const [
+            businessInfo,
+            invoiceCount,
+            quotationCount,
+            clientCount,
+            productCount,
+            invoiceUsage,
+        ] = await Promise.all([
+            BusinessInfo.findOne({ userId }).lean(),
+            Invoice.countDocuments({ userId }),
+            Quotation.countDocuments({ userId }),
+            Client.countDocuments({ userId }),
+            Product.countDocuments({ userId }),
+            getInvoiceUsageForUser(userId),
+        ]);
+
+        const billing = businessInfo
+            ? {
+                  plan: businessInfo.plan || 'free',
+                  billingInterval: businessInfo.billingInterval || null,
+                  subscriptionStatus: businessInfo.subscriptionStatus || null,
+                  subscriptionRenews:
+                      businessInfo.subscriptionStatus === 'active' && businessInfo.premiumUntil
+                          ? businessInfo.premiumUntil
+                          : null,
+                  premiumUntil: businessInfo.premiumUntil || null,
+                  paystackSubscriptionCode: businessInfo.paystackSubscriptionCode || '',
+              }
+            : {
+                  plan: 'free',
+                  billingInterval: null,
+                  subscriptionStatus: null,
+                  subscriptionRenews: null,
+                  premiumUntil: null,
+                  paystackSubscriptionCode: '',
+              };
+
+        res.set('Cache-Control', 'no-store');
+        res.json({
+            user: {
+                id: String(user._id),
+                email: user.email,
+                name: user.name || '',
+                status: user.status,
+                isAdmin: user.isAdmin,
+                authProvider: user.authProvider || 'local',
+                emailVerified: user.emailVerified === undefined ? true : Boolean(user.emailVerified),
+                createdAt: user.createdAt,
+                lastLogin: user.lastLogin || null,
+                lastActiveAt: user.lastActiveAt || null,
+                failedLoginAttempts: user.failedLoginAttempts || 0,
+                lockUntil: user.lockUntil || null,
+            },
+            businessInfo: businessInfo ? toBusinessInfoResponse(businessInfo) : null,
+            stats: {
+                invoiceCount,
+                quotationCount,
+                clientCount,
+                productCount,
+            },
+            invoiceUsage,
+            billing,
+        });
+    } catch (err) {
+        return sendServerError(res, err);
+    }
+});
+
+// Admin: paginated activity timeline
+router.get('/admin/users/:id/activity', auth, requireAdmin, validateObjectId(), async (req, res) => {
+    try {
+        const user = await User.findById(req.params.id).select('_id').lean();
+        if (!user) return res.status(404).json({ message: 'User not found' });
+
+        const { page, limit, skip } = parsePagination(req);
+        const timeline = await buildUserTimeline(req.params.id, { page, limit, skip });
+        if (!timeline) return res.status(404).json({ message: 'User not found' });
+
+        res.set('Cache-Control', 'no-store');
+        res.json(timeline);
+    } catch (err) {
+        return sendServerError(res, err);
+    }
+});
+
+// Admin: paginated payment history
+router.get('/admin/users/:id/payments', auth, requireAdmin, validateObjectId(), async (req, res) => {
+    try {
+        const user = await User.findById(req.params.id).select('_id').lean();
+        if (!user) return res.status(404).json({ message: 'User not found' });
+
+        const { page, limit, skip } = parsePagination(req);
+        const { data, total } = await paginateFind(
+            Payment,
+            { userId: req.params.id },
+            { skip, limit, sort: { paidAt: -1, createdAt: -1 }, lean: true }
+        );
+
+        res.set('Cache-Control', 'no-store');
+        res.json({
+            data: data.map(formatAdminPayment),
+            pagination: buildPaginationMeta(page, limit, total),
+        });
+    } catch (err) {
+        return sendServerError(res, err);
+    }
+});
+
+// Admin: subscription status history
+router.get('/admin/users/:id/subscription-history', auth, requireAdmin, validateObjectId(), async (req, res) => {
+    try {
+        const user = await User.findById(req.params.id).select('_id').lean();
+        if (!user) return res.status(404).json({ message: 'User not found' });
+
+        const { page, limit, skip } = parsePagination(req);
+        const history = await buildSubscriptionHistory(req.params.id, { page, limit, skip });
+
+        res.set('Cache-Control', 'no-store');
+        res.json(history);
+    } catch (err) {
+        return sendServerError(res, err);
+    }
+});
+
+// Admin: list notes for a user
+router.get('/admin/users/:id/notes', auth, requireAdmin, validateObjectId(), async (req, res) => {
+    try {
+        const user = await User.findById(req.params.id).select('_id').lean();
+        if (!user) return res.status(404).json({ message: 'User not found' });
+
+        const notes = await AdminNote.find({ userId: req.params.id })
+            .sort({ createdAt: -1 })
+            .lean();
+
+        res.set('Cache-Control', 'no-store');
+        res.json({
+            data: notes.map((note) => ({
+                id: String(note._id),
+                body: note.body,
+                authorId: String(note.authorId),
+                authorName: note.authorName || '',
+                createdAt: note.createdAt,
+                updatedAt: note.updatedAt,
+            })),
+        });
+    } catch (err) {
+        return sendServerError(res, err);
+    }
+});
+
+// Admin: add note
+router.post('/admin/users/:id/notes', auth, requireAdmin, validateObjectId(), async (req, res) => {
+    try {
+        const user = await User.findById(req.params.id).select('_id').lean();
+        if (!user) return res.status(404).json({ message: 'User not found' });
+
+        const body = sanitizePlainText(req.body?.body, 5000);
+        if (!body.trim()) {
+            return res.status(400).json({ message: 'Note cannot be empty.' });
+        }
+
+        const author = await User.findById(req.user.userId).select('name email').lean();
+        const note = await AdminNote.create({
+            userId: req.params.id,
+            authorId: req.user.userId,
+            authorName: author?.name || author?.email || 'Admin',
+            body: body.trim(),
+        });
+
+        res.status(201).json({
+            note: {
+                id: String(note._id),
+                body: note.body,
+                authorId: String(note.authorId),
+                authorName: note.authorName,
+                createdAt: note.createdAt,
+                updatedAt: note.updatedAt,
+            },
+        });
+    } catch (err) {
+        return sendServerError(res, err);
+    }
+});
+
+// Admin: edit note
+router.patch('/admin/users/:id/notes/:noteId', auth, requireAdmin, validateObjectId('id'), validateObjectId('noteId'), async (req, res) => {
+    try {
+        const body = sanitizePlainText(req.body?.body, 5000);
+        if (!body.trim()) {
+            return res.status(400).json({ message: 'Note cannot be empty.' });
+        }
+
+        const note = await AdminNote.findOneAndUpdate(
+            { _id: req.params.noteId, userId: req.params.id },
+            { $set: { body: body.trim() } },
+            { new: true }
+        ).lean();
+
+        if (!note) return res.status(404).json({ message: 'Note not found' });
+
+        res.json({
+            note: {
+                id: String(note._id),
+                body: note.body,
+                authorId: String(note.authorId),
+                authorName: note.authorName || '',
+                createdAt: note.createdAt,
+                updatedAt: note.updatedAt,
+            },
+        });
+    } catch (err) {
         return sendServerError(res, err);
     }
 });

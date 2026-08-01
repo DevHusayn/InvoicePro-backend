@@ -13,6 +13,8 @@ const userSchema = new mongoose.Schema({
     isAdmin: { type: Boolean, default: false },
     status: { type: String, enum: ['active', 'suspended'], default: 'active' },
     lastLogin: { type: Date },
+    /** Updated on authenticated requests (throttled in auth middleware). */
+    lastActiveAt: { type: Date },
     failedLoginAttempts: { type: Number, default: 0 },
     lockUntil: { type: Date },
     passwordResetToken: { type: String },

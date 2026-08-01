@@ -29,6 +29,10 @@ import {
     notifyPremiumSubscriptionCancelled,
 } from '../src/emails/helpers/premiumNotifications.js';
 import {
+    logSubscriptionCancelled,
+    logSubscriptionPaymentFailed,
+} from '../utils/userActivityLog.js';
+import {
     parsePagination,
     paginateFind,
     buildPaginationMeta,
@@ -502,6 +506,9 @@ export async function paystackWebhookHandler(req, res) {
             if (info) {
                 info.subscriptionStatus = 'cancelled';
                 await info.save();
+                await logSubscriptionCancelled(info.userId, {
+                    billingInterval: info.billingInterval,
+                });
                 await notifyPremiumSubscriptionCancelled(info.userId, {
                     billingInterval: info.billingInterval,
                 });
@@ -517,6 +524,7 @@ export async function paystackWebhookHandler(req, res) {
                     { $set: { subscriptionStatus: 'attention' } }
                 );
                 if (info?.userId) {
+                    await logSubscriptionPaymentFailed(info.userId);
                     await notifyPremiumPaymentFailed(info.userId);
                 }
             }

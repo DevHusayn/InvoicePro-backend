@@ -3,6 +3,8 @@ import User from '../models/User.js';
 import { getTokenFromRequest } from '../utils/authCookie.js';
 import asyncHandler from './asyncHandler.js';
 
+const LAST_ACTIVE_THROTTLE_MS = 5 * 60 * 1000;
+
 export default asyncHandler(async function auth(req, res, next) {
     const token = getTokenFromRequest(req);
     if (!token) {
@@ -24,5 +26,15 @@ export default asyncHandler(async function auth(req, res, next) {
         return res.status(403).json({ message: 'Account suspended. Contact support.' });
     }
     req.user = decoded;
+
+    const throttleBefore = new Date(Date.now() - LAST_ACTIVE_THROTTLE_MS);
+    User.updateOne(
+        {
+            _id: decoded.userId,
+            $or: [{ lastActiveAt: { $exists: false } }, { lastActiveAt: { $lt: throttleBefore } }],
+        },
+        { $set: { lastActiveAt: new Date() } }
+    ).catch(() => {});
+
     next();
 });
