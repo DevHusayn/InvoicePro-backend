@@ -4,9 +4,11 @@ import EmailLayout, { emailStyles } from '../layouts/EmailLayout.js';
 import { formatCurrency } from '../formatters.js';
 import { getFrontendBaseUrl } from '../helpers/invoiceContext.js';
 
-export default function PremiumUpgradeSuccessEmail({ userName, amount, currency = 'NGN', renewsAt }) {
+export default function PremiumUpgradeSuccessEmail({ userName, amount, currency = 'NGN', billingInterval = 'monthly', renewsAt }) {
     const greetingName = userName?.trim() || 'there';
     const settingsUrl = `${getFrontendBaseUrl()}/settings/plan-billing`;
+    const intervalLabel = billingInterval === 'yearly' ? '/year' : '/month';
+    const renewalCopy = billingInterval === 'yearly' ? 'each year' : 'each month';
 
     return React.createElement(
         EmailLayout,
@@ -21,9 +23,9 @@ export default function PremiumUpgradeSuccessEmail({ userName, amount, currency 
             Section,
             { style: emailStyles.detailBox },
             React.createElement(Text, { style: emailStyles.detailLabel }, 'Plan'),
-            React.createElement(Text, { style: emailStyles.detailValue }, 'Waraqah Premium'),
+            React.createElement(Text, { style: emailStyles.detailValue }, billingInterval === 'yearly' ? 'Waraqah Premium (Yearly)' : 'Waraqah Premium (Monthly)'),
             React.createElement(Text, { style: emailStyles.detailLabel }, 'Amount'),
-            React.createElement(Text, { style: emailStyles.detailValueLast }, `${formatCurrency(amount, currency)}/month`),
+            React.createElement(Text, { style: emailStyles.detailValueLast }, `${formatCurrency(amount, currency)}${intervalLabel}`),
             renewsAt
                 ? React.createElement(
                     React.Fragment,
@@ -32,6 +34,11 @@ export default function PremiumUpgradeSuccessEmail({ userName, amount, currency 
                     React.createElement(Text, { style: emailStyles.detailValueLast }, renewsAt),
                 )
                 : null,
+        ),
+        React.createElement(
+            Text,
+            { style: emailStyles.paragraph },
+            `Your plan renews automatically ${renewalCopy} via Paystack until you cancel.`,
         ),
         React.createElement(
             Section,

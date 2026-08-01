@@ -4,7 +4,7 @@ import { sendPremiumUpgradeSuccessEmail } from '../senders/premiumUpgradeSuccess
 import { sendPremiumPaymentFailedEmail } from '../senders/premiumPaymentFailedEmail.js';
 import { sendPremiumSubscriptionCancelledEmail } from '../senders/premiumSubscriptionCancelledEmail.js';
 import { sendAccountSuspendedEmail } from '../senders/accountSuspendedEmail.js';
-import { PREMIUM_AMOUNT_NGN } from '../../../services/paystack.js';
+import { PREMIUM_AMOUNT_NGN, PREMIUM_YEARLY_AMOUNT_NGN, getBillingConfig, normalizeBillingInterval } from '../../../services/paystack.js';
 
 function logFailure(type, err) {
     console.error(`[Waraqah Email] ${type} failed:`, err?.message || err);
@@ -32,15 +32,18 @@ function formatDateLabel(date) {
     });
 }
 
-export async function notifyPremiumUpgradeSuccess(userId) {
+export async function notifyPremiumUpgradeSuccess(userId, { billingInterval = 'monthly' } = {}) {
     try {
         const ctx = await loadUserContext(userId);
         if (!ctx) return;
+        const interval = normalizeBillingInterval(billingInterval);
+        const amount = getBillingConfig(interval).amountNgn;
         await sendPremiumUpgradeSuccessEmail({
             to: ctx.to,
             userName: ctx.userName,
-            amount: PREMIUM_AMOUNT_NGN,
+            amount,
             currency: 'NGN',
+            billingInterval: interval,
             renewsAt: formatDateLabel(ctx.premiumUntil),
         });
     } catch (err) {
@@ -63,7 +66,7 @@ export async function notifyPremiumPaymentFailed(userId) {
     }
 }
 
-export async function notifyPremiumSubscriptionCancelled(userId) {
+export async function notifyPremiumSubscriptionCancelled(userId, { billingInterval = 'monthly' } = {}) {
     try {
         const ctx = await loadUserContext(userId);
         if (!ctx) return;
@@ -71,6 +74,7 @@ export async function notifyPremiumSubscriptionCancelled(userId) {
             to: ctx.to,
             userName: ctx.userName,
             premiumUntil: formatDateLabel(ctx.premiumUntil),
+            billingInterval: normalizeBillingInterval(billingInterval),
         });
     } catch (err) {
         logFailure('Premium subscription cancelled', err);

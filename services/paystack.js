@@ -2,6 +2,23 @@ const PAYSTACK_BASE = 'https://api.paystack.co';
 
 export const PREMIUM_AMOUNT_NGN = 2000;
 export const PREMIUM_AMOUNT_KOBO = PREMIUM_AMOUNT_NGN * 100;
+export const PREMIUM_YEARLY_AMOUNT_NGN = 20000;
+export const PREMIUM_YEARLY_AMOUNT_KOBO = PREMIUM_YEARLY_AMOUNT_NGN * 100;
+export const PREMIUM_LIST_PRICE_YEARLY_NGN = 24000;
+export const PREMIUM_YEARLY_SAVINGS_NGN = 4000;
+
+export const BILLING_INTERVALS = {
+    monthly: { amountNgn: PREMIUM_AMOUNT_NGN, amountKobo: PREMIUM_AMOUNT_KOBO, months: 1 },
+    yearly: { amountNgn: PREMIUM_YEARLY_AMOUNT_NGN, amountKobo: PREMIUM_YEARLY_AMOUNT_KOBO, months: 12 },
+};
+
+export function normalizeBillingInterval(interval) {
+    return interval === 'yearly' ? 'yearly' : 'monthly';
+}
+
+export function getBillingConfig(interval) {
+    return BILLING_INTERVALS[normalizeBillingInterval(interval)];
+}
 
 function getSecretKey() {
     const key = process.env.PAYSTACK_SECRET_KEY;

@@ -4,7 +4,7 @@ import { PLANS, defaultBusinessInfoFields } from '../utils/businessInfoHelpers.j
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 
 /** Extend premium by N months from the later of now or current premiumUntil */
-export async function activatePremiumForUser(userId, { months = 1, subscription = null } = {}) {
+export async function activatePremiumForUser(userId, { months = 1, billingInterval = null, subscription = null } = {}) {
     const extension = months * THIRTY_DAYS_MS;
     let info = await BusinessInfo.findOne({ userId });
 
@@ -23,10 +23,12 @@ export async function activatePremiumForUser(userId, { months = 1, subscription 
             paystackSubscriptionCode: subscription?.subscriptionCode || '',
             paystackCustomerCode: subscription?.customerCode || '',
             paystackEmailToken: subscription?.emailToken || '',
+            billingInterval: billingInterval || null,
         });
     } else {
         info.plan = PLANS.PREMIUM;
         info.premiumUntil = until;
+        if (billingInterval) info.billingInterval = billingInterval;
         if (subscription) {
             info.subscriptionStatus = 'active';
             if (subscription.subscriptionCode) info.paystackSubscriptionCode = subscription.subscriptionCode;

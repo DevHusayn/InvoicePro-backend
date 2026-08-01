@@ -7,6 +7,8 @@ const paymentSchema = new mongoose.Schema({
     currency: { type: String, default: 'NGN' },
     status: { type: String, enum: ['pending', 'success', 'failed'], default: 'pending' },
     type: { type: String, enum: ['one_time', 'subscription'], default: 'subscription' },
+    billingInterval: { type: String, enum: ['monthly', 'yearly', null], default: null },
+    switchFromMonthly: { type: Boolean, default: false },
     paystackSubscriptionCode: { type: String, default: '' },
     channel: { type: String, default: '' },
     paidAt: { type: Date, default: null },

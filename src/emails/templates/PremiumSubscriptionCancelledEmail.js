@@ -3,9 +3,10 @@ import { Button, Section, Text } from '@react-email/components';
 import EmailLayout, { emailStyles } from '../layouts/EmailLayout.js';
 import { getFrontendBaseUrl } from '../helpers/invoiceContext.js';
 
-export default function PremiumSubscriptionCancelledEmail({ userName, premiumUntil }) {
+export default function PremiumSubscriptionCancelledEmail({ userName, premiumUntil, billingInterval = 'monthly' }) {
     const greetingName = userName?.trim() || 'there';
     const billingUrl = `${getFrontendBaseUrl()}/settings/plan-billing`;
+    const periodLabel = billingInterval === 'yearly' ? 'yearly' : 'monthly';
 
     return React.createElement(
         EmailLayout,
@@ -14,7 +15,7 @@ export default function PremiumSubscriptionCancelledEmail({ userName, premiumUnt
         React.createElement(
             Text,
             { style: emailStyles.paragraph },
-            `Hi ${greetingName}, your Waraqah Premium subscription will no longer renew automatically.`,
+            `Hi ${greetingName}, your Waraqah Premium ${periodLabel} subscription will no longer renew automatically.`,
         ),
         premiumUntil
             ? React.createElement(

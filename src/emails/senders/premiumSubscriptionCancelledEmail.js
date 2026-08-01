@@ -2,12 +2,12 @@ import React from 'react';
 import { sendEmail } from '../sendEmail.js';
 import PremiumSubscriptionCancelledEmail from '../templates/PremiumSubscriptionCancelledEmail.js';
 
-export async function sendPremiumSubscriptionCancelledEmail({ to, userName, premiumUntil }) {
+export async function sendPremiumSubscriptionCancelledEmail({ to, userName, premiumUntil, billingInterval = 'monthly' }) {
     return sendEmail({
         to,
         subject: 'Waraqah Premium auto-renewal cancelled',
         type: 'premium-subscription-cancelled',
-        react: React.createElement(PremiumSubscriptionCancelledEmail, { userName, premiumUntil }),
+        react: React.createElement(PremiumSubscriptionCancelledEmail, { userName, premiumUntil, billingInterval }),
         text: premiumUntil
             ? `Premium auto-renewal cancelled. Access continues until ${premiumUntil}.`
             : 'Premium auto-renewal cancelled.',

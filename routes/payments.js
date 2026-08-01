@@ -11,8 +11,13 @@ import {
     generateReference,
     fetchSubscription,
     disableSubscription,
-    PREMIUM_AMOUNT_KOBO,
     PREMIUM_AMOUNT_NGN,
+    PREMIUM_AMOUNT_KOBO,
+    PREMIUM_YEARLY_AMOUNT_NGN,
+    PREMIUM_LIST_PRICE_YEARLY_NGN,
+    PREMIUM_YEARLY_SAVINGS_NGN,
+    getBillingConfig,
+    normalizeBillingInterval,
 } from '../services/paystack.js';
 import { getOrCreatePremiumPlanCode } from '../services/paystackPlan.js';
 import { activatePremiumForUser, deactivatePremiumSubscription } from '../services/premiumActivation.js';
@@ -55,13 +60,48 @@ function subscriptionMetaFromCharge(data) {
     };
 }
 
+function monthsForInterval(interval) {
+    return getBillingConfig(interval).months;
+}
+
+function renewalMessage(interval) {
+    return interval === 'yearly'
+        ? 'Subscription active. Premium renews automatically each year.'
+        : 'Subscription active. Premium renews automatically each month.';
+}
+
+async function disablePreviousMonthlySubscription(userId) {
+    const info = await BusinessInfo.findOne({ userId });
+    const isMonthlySub = !info.billingInterval || info.billingInterval === 'monthly';
+    if (!info?.paystackSubscriptionCode || !isMonthlySub) {
+        return;
+    }
+
+    let emailToken = info.paystackEmailToken;
+    if (!emailToken) {
+        const sub = await fetchSubscription(info.paystackSubscriptionCode);
+        emailToken = sub.email_token;
+    }
+
+    try {
+        await disableSubscription(info.paystackSubscriptionCode, emailToken);
+    } catch (err) {
+        console.error('Could not disable previous monthly subscription:', err.message);
+    }
+}
+
 async function fulfillPremiumPayment(payment, paystackData) {
     if (payment.status === 'success') {
         return payment;
     }
+
+    const billingInterval = normalizeBillingInterval(payment.billingInterval || 'monthly');
+    const months = monthsForInterval(billingInterval);
+
     payment.status = 'success';
     payment.paidAt = paystackData.paid_at ? new Date(paystackData.paid_at) : new Date();
     payment.channel = paystackData.channel || '';
+    payment.billingInterval = billingInterval;
     const subMeta = subscriptionMetaFromCharge(paystackData);
     if (subMeta.subscriptionCode) {
         payment.paystackSubscriptionCode = subMeta.subscriptionCode;
@@ -69,11 +109,16 @@ async function fulfillPremiumPayment(payment, paystackData) {
     }
     await payment.save();
 
+    if (payment.switchFromMonthly && billingInterval === 'yearly') {
+        await disablePreviousMonthlySubscription(payment.userId);
+    }
+
     await activatePremiumForUser(payment.userId, {
-        months: 1,
+        months,
+        billingInterval,
         subscription: subMeta.subscriptionCode ? subMeta : null,
     });
-    await notifyPremiumUpgradeSuccess(payment.userId);
+    await notifyPremiumUpgradeSuccess(payment.userId, { billingInterval });
     return payment;
 }
 
@@ -85,26 +130,31 @@ function formatPaymentForClient(payment) {
         currency: payment.currency || 'NGN',
         status: payment.status,
         type: payment.type,
+        billingInterval: payment.billingInterval || null,
         channel: payment.channel || '',
         paidAt: payment.paidAt,
         createdAt: payment.createdAt,
     };
 }
 
-async function recordSubscriptionCharge(userId, paystackData) {
+async function recordSubscriptionCharge(userId, paystackData, billingInterval = 'monthly') {
     const reference = paystackData.reference;
     if (!reference) return;
 
     const existing = await Payment.findOne({ reference });
     if (existing) return;
 
+    const interval = normalizeBillingInterval(billingInterval);
+    const fallbackAmount = getBillingConfig(interval).amountKobo;
+
     await Payment.create({
         userId,
         reference,
-        amount: paystackData.amount || PREMIUM_AMOUNT_KOBO,
+        amount: paystackData.amount || fallbackAmount,
         currency: (paystackData.currency || 'NGN').toUpperCase(),
         status: 'success',
         type: 'subscription',
+        billingInterval: interval,
         channel: paystackData.channel || '',
         paidAt: paystackData.paid_at ? new Date(paystackData.paid_at) : new Date(),
         paystackSubscriptionCode: paystackData.subscription?.subscription_code || '',
@@ -114,33 +164,57 @@ async function recordSubscriptionCharge(userId, paystackData) {
 async function renewBySubscriptionCode(subscriptionCode, paystackData) {
     const info = await BusinessInfo.findOne({ paystackSubscriptionCode: subscriptionCode });
     if (!info) return;
+
+    const billingInterval = normalizeBillingInterval(info.billingInterval || 'monthly');
+    const months = monthsForInterval(billingInterval);
     const subMeta = subscriptionMetaFromCharge(paystackData);
+
     await activatePremiumForUser(info.userId, {
-        months: 1,
+        months,
+        billingInterval,
         subscription: { ...subMeta, subscriptionCode },
     });
-    await recordSubscriptionCharge(info.userId, paystackData);
+    await recordSubscriptionCharge(info.userId, paystackData, billingInterval);
 }
 
 /** Public pricing info */
 router.get('/plan', auth, async (req, res) => {
     try {
         const info = await BusinessInfo.findOne({ userId: req.user.userId });
-        let paystackPlanCode = process.env.PAYSTACK_PLAN_CODE || '';
-        if (process.env.PAYSTACK_SECRET_KEY && !paystackPlanCode) {
+        const secretKey = process.env.PAYSTACK_SECRET_KEY || '';
+
+        if (secretKey) {
             try {
-                paystackPlanCode = await getOrCreatePremiumPlanCode();
+                if (!process.env.PAYSTACK_PLAN_CODE) {
+                    await getOrCreatePremiumPlanCode('monthly');
+                }
+                if (!process.env.PAYSTACK_PLAN_CODE_YEARLY) {
+                    await getOrCreatePremiumPlanCode('yearly');
+                }
             } catch {
                 /* plan creation optional for display */
             }
         }
-        const secretKey = process.env.PAYSTACK_SECRET_KEY || '';
+
         res.json({
             name: 'Waraqah Premium',
             amount: PREMIUM_AMOUNT_NGN,
             currency: 'NGN',
             interval: 'monthly',
             billing: 'Auto-renews every month via Paystack',
+            plans: {
+                monthly: {
+                    amount: PREMIUM_AMOUNT_NGN,
+                    interval: 'monthly',
+                    listAmount: 5000,
+                },
+                yearly: {
+                    amount: PREMIUM_YEARLY_AMOUNT_NGN,
+                    interval: 'yearly',
+                    listAmount: PREMIUM_LIST_PRICE_YEARLY_NGN,
+                    savings: PREMIUM_YEARLY_SAVINGS_NGN,
+                },
+            },
             paystackConfigured: Boolean(secretKey),
             publicKey: process.env.PAYSTACK_PUBLIC_KEY || '',
             isPaystackTestMode: secretKey.startsWith('sk_test_'),
@@ -150,6 +224,7 @@ router.get('/plan', auth, async (req, res) => {
                     status: info.subscriptionStatus,
                     renewsAt: info.premiumUntil,
                     code: info.paystackSubscriptionCode,
+                    billingInterval: info.billingInterval || null,
                 }
                 : null,
         });
@@ -187,23 +262,43 @@ router.post('/initialize', auth, requireEmailVerified, async (req, res) => {
         const user = await User.findById(req.user.userId);
         if (!user) return res.status(404).json({ message: 'User not found' });
 
-        const planCode = await getOrCreatePremiumPlanCode();
+        const billingInterval = normalizeBillingInterval(req.body?.interval);
+        const switchFromMonthly = Boolean(req.body?.switchFromMonthly);
+        const billingConfig = getBillingConfig(billingInterval);
+
+        if (switchFromMonthly) {
+            if (billingInterval !== 'yearly') {
+                return res.status(400).json({ message: 'Switch is only available for yearly billing' });
+            }
+            const info = await BusinessInfo.findOne({ userId: user._id });
+            const isMonthlySub = !info.billingInterval || info.billingInterval === 'monthly';
+            if (!info?.paystackSubscriptionCode || !isMonthlySub) {
+                return res.status(400).json({ message: 'No active monthly subscription to switch from' });
+            }
+            if (info.subscriptionStatus !== 'active') {
+                return res.status(400).json({ message: 'Your monthly subscription is not active' });
+            }
+        }
+
+        const planCode = await getOrCreatePremiumPlanCode(billingInterval);
         const reference = generateReference(user._id);
 
         const payment = await Payment.create({
             userId: user._id,
             reference,
-            amount: PREMIUM_AMOUNT_KOBO,
+            amount: billingConfig.amountKobo,
             currency: 'NGN',
             status: 'pending',
             type: 'subscription',
+            billingInterval,
+            switchFromMonthly,
         });
 
         const callbackUrl = getCallbackUrl(req);
 
         const data = await initializeTransaction({
             email: user.email,
-            amountKobo: PREMIUM_AMOUNT_KOBO,
+            amountKobo: billingConfig.amountKobo,
             reference,
             callbackUrl,
             planCode,
@@ -212,6 +307,8 @@ router.post('/initialize', auth, requireEmailVerified, async (req, res) => {
                 paymentId: String(payment._id),
                 plan: 'premium',
                 billing: 'subscription',
+                interval: billingInterval,
+                switchFromMonthly,
             },
         });
 
@@ -251,10 +348,14 @@ router.get('/verify/:reference', auth, async (req, res) => {
 
         await fulfillPremiumPayment(payment, data);
 
+        const billingInterval = normalizeBillingInterval(payment.billingInterval || 'monthly');
+        const months = monthsForInterval(billingInterval);
+
         if (data.subscription?.subscription_code) {
             const sub = await fetchSubscription(data.subscription.subscription_code);
             await activatePremiumForUser(req.user.userId, {
-                months: 1,
+                months,
+                billingInterval,
                 subscription: {
                     subscriptionCode: sub.subscription_code,
                     customerCode: sub.customer?.customer_code || '',
@@ -266,7 +367,7 @@ router.get('/verify/:reference', auth, async (req, res) => {
         const businessInfo = await BusinessInfo.findOne({ userId: req.user.userId });
 
         res.json({
-            message: 'Subscription active. Premium renews automatically each month.',
+            message: renewalMessage(billingInterval),
             businessInfo: toBusinessInfoResponse(businessInfo),
         });
     } catch (err) {
@@ -291,7 +392,9 @@ router.post('/subscription/cancel', auth, async (req, res) => {
 
         await disableSubscription(info.paystackSubscriptionCode, emailToken);
         await deactivatePremiumSubscription(req.user.userId);
-        await notifyPremiumSubscriptionCancelled(req.user.userId);
+        await notifyPremiumSubscriptionCancelled(req.user.userId, {
+            billingInterval: info.billingInterval,
+        });
 
         res.json({
             message: 'Auto-renewal cancelled. Premium remains until the end of your billing period.',
@@ -328,9 +431,15 @@ export async function paystackWebhookHandler(req, res) {
         if (eventType === 'subscription.create') {
             const userId = data.metadata?.userId || data.customer?.metadata?.userId;
             const subCode = data.subscription_code;
+            const billingInterval = normalizeBillingInterval(
+                data.metadata?.interval || (data.plan?.interval === 'annually' ? 'yearly' : 'monthly')
+            );
+            const months = monthsForInterval(billingInterval);
+
             if (userId && subCode) {
                 await activatePremiumForUser(userId, {
-                    months: 1,
+                    months,
+                    billingInterval,
                     subscription: {
                         subscriptionCode: subCode,
                         customerCode: data.customer?.customer_code || '',
@@ -342,8 +451,10 @@ export async function paystackWebhookHandler(req, res) {
                 if (!info) {
                     const payment = await Payment.findOne({ paystackSubscriptionCode: subCode });
                     if (payment) {
+                        const interval = normalizeBillingInterval(payment.billingInterval || 'monthly');
                         await activatePremiumForUser(payment.userId, {
-                            months: 1,
+                            months: monthsForInterval(interval),
+                            billingInterval: interval,
                             subscription: {
                                 subscriptionCode: subCode,
                                 emailToken: data.email_token || '',
@@ -360,7 +471,9 @@ export async function paystackWebhookHandler(req, res) {
             if (info) {
                 info.subscriptionStatus = 'cancelled';
                 await info.save();
-                await notifyPremiumSubscriptionCancelled(info.userId);
+                await notifyPremiumSubscriptionCancelled(info.userId, {
+                    billingInterval: info.billingInterval,
+                });
             }
         }
 

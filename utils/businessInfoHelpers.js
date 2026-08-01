@@ -243,6 +243,7 @@ export function toBusinessInfoResponse(doc, { includeAssets = true } = {}) {
         premiumUntil: premium && o.premiumUntil ? o.premiumUntil : null,
         subscriptionStatus: o.subscriptionStatus || null,
         subscriptionRenews: o.subscriptionStatus === 'active' && o.premiumUntil ? o.premiumUntil : null,
+        billingInterval: o.billingInterval || null,
         paystackSubscriptionCode: o.paystackSubscriptionCode || '',
         ...assets,
         paymentAccountName: o.paymentAccountName || '',

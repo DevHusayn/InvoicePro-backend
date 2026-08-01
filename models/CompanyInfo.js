@@ -20,6 +20,7 @@ const businessInfoSchema = new mongoose.Schema({
     paystackSubscriptionCode: { type: String, default: '' },
     paystackCustomerCode: { type: String, default: '' },
     paystackEmailToken: { type: String, default: '' },
+    billingInterval: { type: String, enum: ['monthly', 'yearly', null], default: null },
     /** @deprecated use companyLogoUrl — kept for existing records */
     businessLogo: { type: String, default: '' },
     companyLogoUrl: { type: String, default: '' },
