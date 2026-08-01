@@ -171,7 +171,7 @@ async function recordSubscriptionCharge(userId, paystackData, billingInterval = 
 
 async function renewBySubscriptionCode(subscriptionCode, paystackData) {
     const info = await BusinessInfo.findOne({ paystackSubscriptionCode: subscriptionCode });
-    if (!info) return;
+    if (!info) return null;
 
     const billingInterval = normalizeBillingInterval(info.billingInterval || 'monthly');
     const months = monthsForInterval(billingInterval);
@@ -183,6 +183,62 @@ async function renewBySubscriptionCode(subscriptionCode, paystackData) {
         subscription: { ...subMeta, subscriptionCode },
     });
     await recordSubscriptionCharge(info.userId, paystackData, billingInterval);
+    return info;
+}
+
+function webhookLog(message, details = {}) {
+    console.log('[Paystack webhook]', message, JSON.stringify(details));
+}
+
+async function resolvePaymentFromCharge(data) {
+    const reference = data?.reference;
+    if (!reference) {
+        return { payment: null, match: 'no_reference' };
+    }
+
+    let payment = await Payment.findOne({ reference });
+    if (payment) {
+        return { payment, match: 'reference', reference };
+    }
+
+    const userId = data.metadata?.userId || data.customer?.metadata?.userId;
+    if (userId) {
+        payment = await Payment.findOne({ reference, userId }).sort({ createdAt: -1 });
+        if (payment) {
+            return { payment, match: 'reference_and_userId', reference, userId: String(userId) };
+        }
+
+        payment = await Payment.findOne({ userId, status: 'pending' }).sort({ createdAt: -1 });
+        if (payment) {
+            return {
+                payment,
+                match: 'pending_by_userId',
+                reference,
+                userId: String(userId),
+                paymentReference: payment.reference,
+            };
+        }
+    }
+
+    const customerEmail = data.customer?.email;
+    if (customerEmail) {
+        const user = await User.findOne({ email: customerEmail.toLowerCase() });
+        if (user) {
+            payment = await Payment.findOne({ userId: user._id, status: 'pending' }).sort({ createdAt: -1 });
+            if (payment) {
+                return {
+                    payment,
+                    match: 'pending_by_customer_email',
+                    reference,
+                    userId: String(user._id),
+                    customerEmail,
+                    paymentReference: payment.reference,
+                };
+            }
+        }
+    }
+
+    return { payment: null, match: 'unmatched', reference, userId: userId ? String(userId) : null };
 }
 
 /** Public pricing info + subscription status (used by upgrade flow) */
@@ -440,26 +496,68 @@ router.post('/subscription/cancel', auth, async (req, res) => {
     }
 });
 
-/** Paystack webhook */
+/** Paystack webhook — registered in index.js BEFORE auth/CSRF/rate-limit middleware. */
 export async function paystackWebhookHandler(req, res) {
+    const signature = req.headers['x-paystack-signature'];
+    webhookLog('entry', {
+        method: req.method,
+        path: req.originalUrl || req.url,
+        hasBody: Boolean(req.body?.length),
+        hasSignature: Boolean(signature),
+    });
+
     try {
         const secret = process.env.PAYSTACK_SECRET_KEY;
-        if (!secret) return res.status(503).send('Paystack not configured');
+        if (!secret) {
+            webhookLog('rejected', { reason: 'paystack_not_configured' });
+            return res.status(503).send('Paystack not configured');
+        }
 
-        const signature = req.headers['x-paystack-signature'];
         const hash = crypto.createHmac('sha512', secret).update(req.body).digest('hex');
-        if (hash !== signature) return res.status(401).send('Invalid signature');
+        const signatureValid = hash === signature;
+        webhookLog('signature', { valid: signatureValid });
+
+        if (!signatureValid) return res.status(401).send('Invalid signature');
 
         const event = JSON.parse(req.body.toString());
         const { event: eventType, data } = event;
 
+        webhookLog('event', {
+            eventType,
+            reference: data?.reference || null,
+            customerEmail: data?.customer?.email || null,
+            metadataUserId: data?.metadata?.userId || data?.customer?.metadata?.userId || null,
+            subscriptionCode:
+                data?.subscription?.subscription_code || data?.subscription_code || null,
+        });
+
         if (eventType === 'charge.success') {
-            const { reference } = data;
-            const payment = await Payment.findOne({ reference });
-            if (payment) {
-                await fulfillPremiumPayment(payment, data);
+            const resolved = await resolvePaymentFromCharge(data);
+            webhookLog('charge.success.resolve', resolved);
+
+            if (resolved.payment) {
+                await fulfillPremiumPayment(resolved.payment, data);
+                const info = await BusinessInfo.findOne({ userId: resolved.payment.userId });
+                webhookLog('charge.success.updated', {
+                    userId: String(resolved.payment.userId),
+                    paymentId: String(resolved.payment._id),
+                    paymentReference: resolved.payment.reference,
+                    plan: info?.plan || null,
+                    subscriptionStatus: info?.subscriptionStatus || null,
+                    premiumUntil: info?.premiumUntil || null,
+                });
             } else if (data.subscription?.subscription_code) {
-                await renewBySubscriptionCode(data.subscription.subscription_code, data);
+                const info = await renewBySubscriptionCode(data.subscription.subscription_code, data);
+                webhookLog('charge.success.renewBySubscription', {
+                    subscriptionCode: data.subscription.subscription_code,
+                    userId: info ? String(info.userId) : null,
+                    matched: Boolean(info),
+                });
+            } else {
+                webhookLog('charge.success.unhandled', {
+                    reference: data?.reference || null,
+                    reason: 'no_payment_or_subscription_match',
+                });
             }
         }
 
@@ -481,6 +579,13 @@ export async function paystackWebhookHandler(req, res) {
                         emailToken: data.email_token || '',
                     },
                 });
+                const info = await BusinessInfo.findOne({ userId });
+                webhookLog('subscription.create.updated', {
+                    userId: String(userId),
+                    subscriptionCode: subCode,
+                    plan: info?.plan || null,
+                    subscriptionStatus: info?.subscriptionStatus || null,
+                });
             } else if (subCode) {
                 const info = await BusinessInfo.findOne({ paystackSubscriptionCode: subCode });
                 if (!info) {
@@ -495,6 +600,13 @@ export async function paystackWebhookHandler(req, res) {
                                 emailToken: data.email_token || '',
                             },
                         });
+                        webhookLog('subscription.create.updated', {
+                            userId: String(payment.userId),
+                            subscriptionCode: subCode,
+                            via: 'payment_record',
+                        });
+                    } else {
+                        webhookLog('subscription.create.unhandled', { subscriptionCode: subCode });
                     }
                 }
             }
@@ -532,6 +644,7 @@ export async function paystackWebhookHandler(req, res) {
 
         res.sendStatus(200);
     } catch (err) {
+        webhookLog('error', { message: err.message });
         console.error('Paystack webhook error:', err);
         res.sendStatus(500);
     }

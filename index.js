@@ -41,6 +41,7 @@ app.post(
     express.raw({ type: 'application/json' }),
     paystackWebhookHandler
 );
+// Webhook is public: no auth, CSRF, or global rate limiters (registered above middleware stack).
 
 app.use(express.json({ limit: '2mb' }));
 app.use(cookieParser());
