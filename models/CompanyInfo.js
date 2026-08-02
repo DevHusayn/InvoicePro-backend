@@ -37,6 +37,8 @@ const businessInfoSchema = new mongoose.Schema({
     autoEmailInvoices: { type: Boolean, default: false },
     /** Email payment reminders automatically for due soon / overdue invoices. */
     autoPaymentReminders: { type: Boolean, default: true },
+    /** premiumUntil value this expiry reminder was sent for (avoids duplicate sends). */
+    premiumExpiryReminderForUntil: { type: Date, default: null },
 }, { timestamps: true });
 
 businessInfoSchema.index({ paystackSubscriptionCode: 1 }, { sparse: true });

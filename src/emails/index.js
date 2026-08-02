@@ -32,6 +32,7 @@ export {
     sendPremiumUpgradeSuccessEmail,
     sendPremiumPaymentFailedEmail,
     sendPremiumSubscriptionCancelledEmail,
+    sendPremiumExpiryReminderEmail,
 } from './senders/index.js';
 
 export {

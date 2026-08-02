@@ -74,6 +74,22 @@ export async function fetchSubscription(subscriptionCode) {
     });
 }
 
+export async function fetchCustomer(emailOrCode) {
+    return paystackRequest(`/customer/${encodeURIComponent(emailOrCode)}`, {
+        method: 'GET',
+    });
+}
+
+export async function listSubscriptions({ customer, plan } = {}) {
+    const params = new URLSearchParams();
+    if (customer) params.set('customer', customer);
+    if (plan) params.set('plan', plan);
+    const query = params.toString();
+    return paystackRequest(`/subscription${query ? `?${query}` : ''}`, {
+        method: 'GET',
+    });
+}
+
 export async function disableSubscription(subscriptionCode, emailToken) {
     return paystackRequest('/subscription/disable', {
         method: 'POST',

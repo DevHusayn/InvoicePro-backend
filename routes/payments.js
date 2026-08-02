@@ -21,6 +21,12 @@ import {
 } from '../services/paystack.js';
 import { getOrCreatePremiumPlanCode } from '../services/paystackPlan.js';
 import { activatePremiumForUser, deactivatePremiumSubscription } from '../services/premiumActivation.js';
+import {
+    ensurePaystackSubscriptionLinked,
+    needsSubscriptionLink,
+    resolveUserIdForSubscriptionEvent,
+    subscriptionMetaFromCharge,
+} from '../services/paystackSubscriptionLink.js';
 import { toBusinessInfoResponse, isPremiumActive } from '../utils/businessInfoHelpers.js';
 import { isOriginAllowed } from '../utils/corsConfig.js';
 import {
@@ -53,16 +59,6 @@ function getCallbackUrl(req) {
         .toString()
         .replace(/\/$/, '');
     return `${base}/upgrade/callback`;
-}
-
-function subscriptionMetaFromCharge(data) {
-    const sub = data.subscription || data.authorization?.subscription_code;
-    const subscriptionCode = typeof sub === 'string' ? sub : sub?.subscription_code;
-    return {
-        subscriptionCode: subscriptionCode || '',
-        customerCode: data.customer?.customer_code || data.customer?.id || '',
-        emailToken: data.subscription?.email_token || '',
-    };
 }
 
 function monthsForInterval(interval) {
@@ -100,11 +96,15 @@ async function disablePreviousMonthlySubscription(userId) {
 
 async function fulfillPremiumPayment(payment, paystackData) {
     if (payment.status === 'success') {
+        await ensurePaystackSubscriptionLinked({
+            userId: payment.userId,
+            payment,
+            paystackData,
+        });
         return payment;
     }
 
     const billingInterval = normalizeBillingInterval(payment.billingInterval || 'monthly');
-    const months = monthsForInterval(billingInterval);
 
     payment.status = 'success';
     payment.paidAt = paystackData.paid_at ? new Date(paystackData.paid_at) : new Date();
@@ -121,10 +121,10 @@ async function fulfillPremiumPayment(payment, paystackData) {
         await disablePreviousMonthlySubscription(payment.userId);
     }
 
-    await activatePremiumForUser(payment.userId, {
-        months,
-        billingInterval,
-        subscription: subMeta.subscriptionCode ? subMeta : null,
+    await ensurePaystackSubscriptionLinked({
+        userId: payment.userId,
+        payment,
+        paystackData,
     });
     await notifyPremiumUpgradeSuccess(payment.userId, { billingInterval });
     return payment;
@@ -407,63 +407,82 @@ router.get('/verify/:reference', auth, paymentVerificationLimiter, async (req, r
 
         let businessInfo = await BusinessInfo.findOne({ userId: req.user.userId });
         const billingInterval = normalizeBillingInterval(payment.billingInterval || 'monthly');
+        let paystackData = null;
+        let alreadyVerified = payment.status === 'success';
 
-        if (payment.status === 'success') {
-            return res.json({
-                message: renewalMessage(billingInterval),
-                businessInfo: toBusinessInfoResponse(businessInfo),
-                alreadyVerified: true,
-            });
+        if (payment.status !== 'success') {
+            if (payment.status === 'pending' && isPremiumActive(businessInfo)) {
+                payment.status = 'success';
+                payment.paidAt = payment.paidAt || new Date();
+                await payment.save();
+                alreadyVerified = true;
+            } else {
+                paystackData = await verifyTransaction(reference);
+                if (paystackData.status !== 'success') {
+                    payment.status = 'failed';
+                    await payment.save();
+                    return res.status(400).json({
+                        message: 'Payment was not completed',
+                        status: paystackData.status,
+                    });
+                }
+
+                await fulfillPremiumPayment(payment, paystackData);
+                alreadyVerified = false;
+            }
         }
 
-        // Webhook may have activated Premium before this verify call runs.
-        if (payment.status === 'pending' && isPremiumActive(businessInfo)) {
-            payment.status = 'success';
-            payment.paidAt = payment.paidAt || new Date();
-            await payment.save();
-
-            return res.json({
-                message: renewalMessage(billingInterval),
-                businessInfo: toBusinessInfoResponse(businessInfo),
-                alreadyVerified: true,
-            });
+        if (!paystackData) {
+            try {
+                paystackData = await verifyTransaction(reference);
+            } catch (err) {
+                console.error('[Paystack] verifyTransaction during subscription sync failed:', err.message);
+            }
         }
 
-        const data = await verifyTransaction(reference);
-        if (data.status !== 'success') {
-            payment.status = 'failed';
-            await payment.save();
-            return res.status(400).json({
-                message: 'Payment was not completed',
-                status: data.status,
-            });
-        }
-
-        await fulfillPremiumPayment(payment, data);
-
-        const months = monthsForInterval(billingInterval);
-
-        if (data.subscription?.subscription_code) {
-            const sub = await fetchSubscription(data.subscription.subscription_code);
-            await activatePremiumForUser(req.user.userId, {
-                months,
-                billingInterval,
-                subscription: {
-                    subscriptionCode: sub.subscription_code,
-                    customerCode: sub.customer?.customer_code || '',
-                    emailToken: sub.email_token || '',
-                },
-            });
-        }
-
-        businessInfo = await BusinessInfo.findOne({ userId: req.user.userId });
+        businessInfo = await ensurePaystackSubscriptionLinked({
+            userId: req.user.userId,
+            payment,
+            paystackData,
+        }) || await BusinessInfo.findOne({ userId: req.user.userId });
 
         res.json({
             message: renewalMessage(billingInterval),
             businessInfo: toBusinessInfoResponse(businessInfo),
+            alreadyVerified,
         });
     } catch (err) {
         res.status(500).json({ message: err.message || 'Verification failed' });
+    }
+});
+
+/** Repair missing Paystack subscription metadata for an already-paid checkout. */
+router.post('/subscription/sync', auth, async (req, res) => {
+    try {
+        const payment = await Payment.findOne({
+            userId: req.user.userId,
+            type: 'subscription',
+            status: 'success',
+        }).sort({ paidAt: -1, createdAt: -1 });
+
+        const info = await ensurePaystackSubscriptionLinked({
+            userId: req.user.userId,
+            payment,
+            paystackData: null,
+        });
+
+        if (needsSubscriptionLink(info)) {
+            return res.status(404).json({
+                message: 'No Paystack subscription was found for this account.',
+            });
+        }
+
+        res.json({
+            message: 'Subscription linked successfully.',
+            businessInfo: toBusinessInfoResponse(info),
+        });
+    } catch (err) {
+        res.status(500).json({ message: err.message || 'Could not sync subscription' });
     }
 });
 
@@ -563,8 +582,8 @@ export async function paystackWebhookHandler(req, res) {
         }
 
         if (eventType === 'subscription.create') {
-            const userId = data.metadata?.userId || data.customer?.metadata?.userId;
             const subCode = data.subscription_code;
+            const userId = await resolveUserIdForSubscriptionEvent(data, subCode);
             const billingInterval = normalizeBillingInterval(
                 data.metadata?.interval || (data.plan?.interval === 'annually' ? 'yearly' : 'monthly')
             );
@@ -580,6 +599,10 @@ export async function paystackWebhookHandler(req, res) {
                         emailToken: data.email_token || '',
                     },
                 });
+                await Payment.updateMany(
+                    { userId, type: 'subscription', paystackSubscriptionCode: { $in: ['', null] } },
+                    { $set: { paystackSubscriptionCode: subCode } },
+                );
                 const info = await BusinessInfo.findOne({ userId });
                 webhookLog('subscription.create.updated', {
                     userId: String(userId),
@@ -588,28 +611,7 @@ export async function paystackWebhookHandler(req, res) {
                     subscriptionStatus: info?.subscriptionStatus || null,
                 });
             } else if (subCode) {
-                const info = await BusinessInfo.findOne({ paystackSubscriptionCode: subCode });
-                if (!info) {
-                    const payment = await Payment.findOne({ paystackSubscriptionCode: subCode });
-                    if (payment) {
-                        const interval = normalizeBillingInterval(payment.billingInterval || 'monthly');
-                        await activatePremiumForUser(payment.userId, {
-                            months: monthsForInterval(interval),
-                            billingInterval: interval,
-                            subscription: {
-                                subscriptionCode: subCode,
-                                emailToken: data.email_token || '',
-                            },
-                        });
-                        webhookLog('subscription.create.updated', {
-                            userId: String(payment.userId),
-                            subscriptionCode: subCode,
-                            via: 'payment_record',
-                        });
-                    } else {
-                        webhookLog('subscription.create.unhandled', { subscriptionCode: subCode });
-                    }
-                }
+                webhookLog('subscription.create.unhandled', { subscriptionCode: subCode });
             }
         }
 

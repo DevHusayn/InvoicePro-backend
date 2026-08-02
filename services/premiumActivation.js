@@ -28,6 +28,7 @@ export async function activatePremiumForUser(userId, { months = 1, billingInterv
     } else {
         info.plan = PLANS.PREMIUM;
         info.premiumUntil = until;
+        info.premiumExpiryReminderForUntil = null;
         if (billingInterval) info.billingInterval = billingInterval;
         if (subscription) {
             info.subscriptionStatus = 'active';
@@ -44,6 +45,37 @@ export async function deactivatePremiumSubscription(userId) {
     const info = await BusinessInfo.findOne({ userId });
     if (!info) return null;
     info.subscriptionStatus = 'cancelled';
+    await info.save();
+    return info;
+}
+
+/** Attach Paystack subscription metadata without changing premiumUntil. */
+export async function linkPaystackSubscription(userId, { subscription, billingInterval = null } = {}) {
+    if (!subscription?.subscriptionCode) {
+        return BusinessInfo.findOne({ userId });
+    }
+
+    let info = await BusinessInfo.findOne({ userId });
+    if (!info) {
+        info = await BusinessInfo.create({
+            userId,
+            ...defaultBusinessInfoFields,
+            plan: PLANS.PREMIUM,
+            subscriptionStatus: 'active',
+            paystackSubscriptionCode: subscription.subscriptionCode,
+            paystackCustomerCode: subscription.customerCode || '',
+            paystackEmailToken: subscription.emailToken || '',
+            billingInterval: billingInterval || null,
+        });
+        return info;
+    }
+
+    info.plan = PLANS.PREMIUM;
+    info.subscriptionStatus = 'active';
+    info.paystackSubscriptionCode = subscription.subscriptionCode;
+    if (subscription.customerCode) info.paystackCustomerCode = subscription.customerCode;
+    if (subscription.emailToken) info.paystackEmailToken = subscription.emailToken;
+    if (billingInterval) info.billingInterval = billingInterval;
     await info.save();
     return info;
 }

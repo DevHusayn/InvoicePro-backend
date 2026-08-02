@@ -1,5 +1,6 @@
 import express from 'express';
 import { sendDuePaymentReminders } from '../paymentReminderAutomation.js';
+import { sendPremiumExpiryReminders } from '../premiumExpiryReminderAutomation.js';
 import { generateRecurringInvoices } from '../utils/recurringInvoices.js';
 import { syncAllOverdueInvoices } from '../utils/invoiceOverdue.js';
 import { syncAllExpiredQuotations } from '../utils/quotationExpire.js';
@@ -25,6 +26,12 @@ function verifyCronSecret(req, res, next) {
 router.get('/payment-reminders', verifyCronSecret, asyncHandler(async (req, res) => {
     await sendDuePaymentReminders();
     res.json({ ok: true, message: 'Payment reminders processed.' });
+}));
+
+/** Vercel Cron — remind non-renewing Premium users before access ends. */
+router.get('/premium-expiry-reminders', verifyCronSecret, asyncHandler(async (req, res) => {
+    const { processed } = await sendPremiumExpiryReminders();
+    res.json({ ok: true, message: 'Premium expiry reminders processed.', processed });
 }));
 
 /** Vercel Cron — mark pending invoices past due as overdue (all users). */
