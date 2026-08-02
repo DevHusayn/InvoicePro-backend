@@ -95,30 +95,25 @@ async function disablePreviousMonthlySubscription(userId) {
 }
 
 async function fulfillPremiumPayment(payment, paystackData) {
-    if (payment.status === 'success') {
-        await ensurePaystackSubscriptionLinked({
-            userId: payment.userId,
-            payment,
-            paystackData,
-        });
-        return payment;
-    }
-
+    const firstFulfillment = payment.status !== 'success';
     const billingInterval = normalizeBillingInterval(payment.billingInterval || 'monthly');
-
-    payment.status = 'success';
-    payment.paidAt = paystackData.paid_at ? new Date(paystackData.paid_at) : new Date();
-    payment.channel = paystackData.channel || '';
-    payment.billingInterval = billingInterval;
+    const months = monthsForInterval(billingInterval);
     const subMeta = subscriptionMetaFromCharge(paystackData);
-    if (subMeta.subscriptionCode) {
-        payment.paystackSubscriptionCode = subMeta.subscriptionCode;
-        payment.type = 'subscription';
-    }
-    await payment.save();
 
-    if (payment.switchFromMonthly && billingInterval === 'yearly') {
-        await disablePreviousMonthlySubscription(payment.userId);
+    if (firstFulfillment) {
+        payment.status = 'success';
+        payment.paidAt = paystackData.paid_at ? new Date(paystackData.paid_at) : new Date();
+        payment.channel = paystackData.channel || '';
+        payment.billingInterval = billingInterval;
+        if (subMeta.subscriptionCode) {
+            payment.paystackSubscriptionCode = subMeta.subscriptionCode;
+            payment.type = 'subscription';
+        }
+        await payment.save();
+
+        if (payment.switchFromMonthly && billingInterval === 'yearly') {
+            await disablePreviousMonthlySubscription(payment.userId);
+        }
     }
 
     await ensurePaystackSubscriptionLinked({
@@ -126,7 +121,21 @@ async function fulfillPremiumPayment(payment, paystackData) {
         payment,
         paystackData,
     });
-    await notifyPremiumUpgradeSuccess(payment.userId, { billingInterval });
+
+    const info = await BusinessInfo.findOne({ userId: payment.userId });
+    if (firstFulfillment && !isPremiumActive(info)) {
+        await activatePremiumForUser(payment.userId, {
+            months,
+            billingInterval,
+            subscription: subMeta.subscriptionCode ? subMeta : null,
+            fromPayment: true,
+        });
+    }
+
+    if (firstFulfillment) {
+        await notifyPremiumUpgradeSuccess(payment.userId, { billingInterval });
+    }
+
     return payment;
 }
 
@@ -446,6 +455,16 @@ router.get('/verify/:reference', auth, paymentVerificationLimiter, async (req, r
             paystackData,
         }) || await BusinessInfo.findOne({ userId: req.user.userId });
 
+        if (!isPremiumActive(businessInfo) && payment.status === 'success') {
+            const subMeta = subscriptionMetaFromCharge(paystackData);
+            businessInfo = await activatePremiumForUser(req.user.userId, {
+                months: monthsForInterval(billingInterval),
+                billingInterval,
+                subscription: subMeta.subscriptionCode ? subMeta : null,
+                fromPayment: true,
+            });
+        }
+
         res.json({
             message: renewalMessage(billingInterval),
             businessInfo: toBusinessInfoResponse(businessInfo),
@@ -618,7 +637,7 @@ export async function paystackWebhookHandler(req, res) {
         if (eventType === 'subscription.disable' || eventType === 'subscription.not_renew') {
             const subCode = data.subscription_code;
             const info = await BusinessInfo.findOne({ paystackSubscriptionCode: subCode });
-            if (info) {
+            if (info && info.paystackSubscriptionCode === subCode && info.subscriptionStatus !== 'cancelled') {
                 info.subscriptionStatus = 'cancelled';
                 await info.save();
                 await logSubscriptionCancelled(info.userId, {

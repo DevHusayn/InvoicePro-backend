@@ -172,6 +172,14 @@ export async function ensurePaystackSubscriptionLinked({ userId, payment = null,
     });
 
     if (!meta.subscriptionCode) {
+        if (payment?.status === 'success') {
+            return activatePremiumForUser(userId, {
+                months,
+                billingInterval,
+                subscription: null,
+                fromPayment: true,
+            });
+        }
         return info;
     }
 

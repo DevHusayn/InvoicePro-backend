@@ -4,7 +4,10 @@ import { PLANS, defaultBusinessInfoFields } from '../utils/businessInfoHelpers.j
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 
 /** Extend premium by N months from the later of now or current premiumUntil */
-export async function activatePremiumForUser(userId, { months = 1, billingInterval = null, subscription = null } = {}) {
+export async function activatePremiumForUser(
+    userId,
+    { months = 1, billingInterval = null, subscription = null, fromPayment = false } = {},
+) {
     const extension = months * THIRTY_DAYS_MS;
     let info = await BusinessInfo.findOne({ userId });
 
@@ -30,11 +33,17 @@ export async function activatePremiumForUser(userId, { months = 1, billingInterv
         info.premiumUntil = until;
         info.premiumExpiryReminderForUntil = null;
         if (billingInterval) info.billingInterval = billingInterval;
-        if (subscription) {
+        if (subscription?.subscriptionCode) {
             info.subscriptionStatus = 'active';
-            if (subscription.subscriptionCode) info.paystackSubscriptionCode = subscription.subscriptionCode;
+            info.paystackSubscriptionCode = subscription.subscriptionCode;
             if (subscription.customerCode) info.paystackCustomerCode = subscription.customerCode;
             if (subscription.emailToken) info.paystackEmailToken = subscription.emailToken;
+        } else if (
+            fromPayment
+            && (info.subscriptionStatus === 'cancelled' || info.subscriptionStatus === 'attention')
+        ) {
+            // Re-subscribe after cancel — restore access; Paystack sub code may link later via sync.
+            info.subscriptionStatus = info.paystackSubscriptionCode ? 'active' : null;
         }
         await info.save();
     }
