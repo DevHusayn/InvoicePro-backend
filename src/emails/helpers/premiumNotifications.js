@@ -4,6 +4,8 @@ import { sendPremiumUpgradeSuccessEmail } from '../senders/premiumUpgradeSuccess
 import { sendPremiumPaymentFailedEmail } from '../senders/premiumPaymentFailedEmail.js';
 import { sendPremiumSubscriptionCancelledEmail } from '../senders/premiumSubscriptionCancelledEmail.js';
 import { sendAccountSuspendedEmail } from '../senders/accountSuspendedEmail.js';
+import { sendAccountReactivatedEmail } from '../senders/accountReactivatedEmail.js';
+import { getFrontendBaseUrl } from './invoiceContext.js';
 import { PREMIUM_AMOUNT_NGN, PREMIUM_YEARLY_AMOUNT_NGN, getBillingConfig, normalizeBillingInterval } from '../../../services/paystack.js';
 
 function logFailure(type, err) {
@@ -90,5 +92,18 @@ export async function notifyAccountSuspended(user) {
         });
     } catch (err) {
         logFailure('Account suspended', err);
+    }
+}
+
+export async function notifyAccountReactivated(user) {
+    try {
+        if (!user?.email?.trim()) return;
+        await sendAccountReactivatedEmail({
+            to: user.email.trim().toLowerCase(),
+            userName: user.name,
+            dashboardUrl: getFrontendBaseUrl(),
+        });
+    } catch (err) {
+        logFailure('Account reactivated', err);
     }
 }

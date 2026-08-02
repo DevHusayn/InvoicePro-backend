@@ -6,6 +6,14 @@ import {
 import { getAdminNotifyEmail } from '../config.js';
 import { getFrontendBaseUrl } from './invoiceContext.js';
 
+function logSignupEmailFailures(results, types) {
+    results.forEach((result, index) => {
+        if (result.status === 'rejected') {
+            console.error(`[Waraqah Email] Signup ${types[index]} failed:`, result.reason);
+        }
+    });
+}
+
 /**
  * Notify the platform admin about a new signup.
  * Failures are logged but never block signup.
@@ -59,10 +67,30 @@ export async function sendRegistrationEmails({ user, verificationToken, business
         }),
     ]);
 
-    results.forEach((result, index) => {
-        if (result.status === 'rejected') {
-            const type = ['welcome', 'email-verification', 'admin-new-user'][index];
-            console.error(`[Waraqah Email] Registration ${type} failed:`, result.reason);
-        }
-    });
+    logSignupEmailFailures(results, ['welcome', 'email-verification', 'admin-new-user']);
+}
+
+/**
+ * Send welcome + admin notification after OAuth signup (Google, etc.).
+ * No verification email — the provider has already verified the address.
+ * Must be awaited before the HTTP response on serverless (Vercel).
+ * Failures are logged but do not block signup.
+ */
+export async function sendOAuthSignupEmails({ user, businessName, signupMethod = 'google' }) {
+    const dashboardUrl = getFrontendBaseUrl();
+
+    const results = await Promise.allSettled([
+        sendWelcomeEmail({
+            to: user.email,
+            userName: user.name,
+            dashboardUrl,
+        }),
+        notifyAdminNewUser({
+            user,
+            businessName,
+            signupMethod,
+        }),
+    ]);
+
+    logSignupEmailFailures(results, ['welcome', 'admin-new-user']);
 }

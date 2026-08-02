@@ -27,6 +27,7 @@ export {
     sendInvoiceCancelledClientEmail,
     sendInvoiceCancelledOwnerNotification,
     sendAccountSuspendedEmail,
+    sendAccountReactivatedEmail,
     sendNewUserAdminNotification,
     sendPremiumUpgradeSuccessEmail,
     sendPremiumPaymentFailedEmail,
@@ -47,6 +48,7 @@ export {
     notifyPremiumPaymentFailed,
     notifyPremiumSubscriptionCancelled,
     notifyAccountSuspended,
+    notifyAccountReactivated,
 } from './helpers/premiumNotifications.js';
 
 export {

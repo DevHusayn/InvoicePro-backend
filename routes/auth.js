@@ -21,8 +21,8 @@ import {
     resetFreeInvoiceUsageForUser,
 } from '../utils/invoiceLimits.js';
 import { sendPasswordResetEmail, getEmailErrorMessage, PASSWORD_RESET_EXPIRY_MINUTES, sendEmailVerificationEmail } from '../src/emails/index.js';
-import { notifyAdminNewUser, sendRegistrationEmails } from '../src/emails/helpers/accountEmails.js';
-import { notifyAccountSuspended } from '../src/emails/helpers/premiumNotifications.js';
+import { sendOAuthSignupEmails, sendRegistrationEmails } from '../src/emails/helpers/accountEmails.js';
+import { notifyAccountReactivated, notifyAccountSuspended } from '../src/emails/helpers/premiumNotifications.js';
 import { EMAIL_VERIFICATION_EXPIRY_HOURS } from '../src/emails/config.js';
 import { isStrongPassword, PASSWORD_REQUIREMENTS_MESSAGE } from '../utils/passwordValidation.js';
 import { createPasswordResetToken, hashPasswordResetToken } from '../utils/resetToken.js';
@@ -146,6 +146,7 @@ router.patch('/admin/users/:id/status', auth, requireAdmin, validateObjectId(), 
             await notifyAccountSuspended(user);
             await logUserSuspended(user._id, req.user.userId);
         } else {
+            await notifyAccountReactivated(user);
             await logUserReactivated(user._id, req.user.userId);
         }
         res.json({ message: 'User status updated', status: user.status });
@@ -626,8 +627,9 @@ router.post('/google', loginLimiter, async (req, res) => {
         const profile = await verifyGoogleCredential(credential);
         const { user, isNewUser } = await findOrCreateOAuthUser(profile);
         if (isNewUser) {
-            await notifyAdminNewUser({
+            await sendOAuthSignupEmails({
                 user,
+                businessName: user.name,
                 signupMethod: 'google',
             });
         }

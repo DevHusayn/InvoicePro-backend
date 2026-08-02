@@ -20,6 +20,7 @@ export { sendInvoiceReceiptSentOwnerNotification } from './invoiceReceiptSentOwn
 export { sendInvoiceCancelledClientEmail } from './invoiceCancelledClientEmail.js';
 export { sendInvoiceCancelledOwnerNotification } from './invoiceCancelledOwnerNotification.js';
 export { sendAccountSuspendedEmail } from './accountSuspendedEmail.js';
+export { sendAccountReactivatedEmail } from './accountReactivatedEmail.js';
 export { sendNewUserAdminNotification } from './newUserAdminNotification.js';
 export { sendPremiumUpgradeSuccessEmail } from './premiumUpgradeSuccessEmail.js';
 export { sendPremiumPaymentFailedEmail } from './premiumPaymentFailedEmail.js';

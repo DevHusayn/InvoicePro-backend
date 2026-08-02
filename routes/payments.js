@@ -283,6 +283,7 @@ router.get('/plan', auth, paymentVerificationLimiter, async (req, res) => {
             publicKey: process.env.PAYSTACK_PUBLIC_KEY || '',
             isPaystackTestMode: secretKey.startsWith('sk_test_'),
             devPlanToggleEnabled: process.env.ALLOW_DEV_PLAN === 'true',
+            isPremium: isPremiumActive(info),
             subscription: info?.subscriptionStatus === 'active'
                 ? {
                     status: info.subscriptionStatus,
