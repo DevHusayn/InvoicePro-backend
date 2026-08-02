@@ -34,7 +34,7 @@ export function getNextPaymentReminderDate(lastPaymentReminderAt) {
 }
 
 export function getEmailFromAddress() {
-    return process.env.EMAIL_FROM?.trim() || 'Waraqah <notifications@mywaraqah.com>';
+    return process.env.EMAIL_FROM?.trim() || 'Waraqah <no_reply@mail.mywaraqah.com>';
 }
 
 export function getSupportEmail() {
