@@ -19,6 +19,8 @@ import {
     resolveReceiptPaymentAmount,
     isReceiptDocument,
     applyReceiptPayment,
+    buildReceiptPartialFilter,
+    buildReceiptFullFilter,
 } from '../utils/receiptValidation.js';
 import { RECEIPT_ONLY_FILTER } from '../utils/invoiceDocumentFilter.js';
 import { attachPublicTokenIfNeeded } from '../utils/invoicePublicToken.js';
@@ -94,6 +96,34 @@ async function attachClientNames(receipts, userId) {
     });
 }
 
+const RECEIPT_LIST_BASE = { status: PAID, ...RECEIPT_ONLY_FILTER };
+
+async function getReceiptPaymentStatusCounts(userId) {
+    const uid = toUserObjectId(userId);
+    const base = { userId: uid, ...RECEIPT_LIST_BASE };
+    const [all, partial] = await Promise.all([
+        Invoice.countDocuments(base),
+        Invoice.countDocuments({ ...base, ...buildReceiptPartialFilter() }),
+    ]);
+    return { all, partial, full: Math.max(0, all - partial) };
+}
+
+async function mergeReceiptSearchFilter(filter, userId, search) {
+    const q = String(search || '').trim();
+    if (!q) return filter;
+
+    const clientIds = await resolveSearchClientIds(userId, q);
+    const textFilter = buildSearchFilter(q, ['receiptNumber']);
+    const or = [...(textFilter?.$or || [])];
+    if (clientIds.length > 0) {
+        or.push({ clientId: { $in: clientIds } });
+    }
+    if (or.length > 0) {
+        return { ...filter, $or: or };
+    }
+    return filter;
+}
+
 async function resolveSearchClientIds(userId, search) {
     const q = String(search || '').trim();
     if (!q) return [];
@@ -122,34 +152,34 @@ router.get('/', auth, asyncHandler(async (req, res) => {
     const sortKey = String(req.query.sort || 'newest').trim();
     const sort = RECEIPT_SORT[sortKey] || RECEIPT_SORT.newest;
     const search = String(req.query.search || '').trim();
+    const paymentStatus = String(req.query.status || 'all').trim().toLowerCase();
 
-    const filter = { userId, status: PAID, ...RECEIPT_ONLY_FILTER };
+    let filter = { userId, ...RECEIPT_LIST_BASE };
 
-    if (search) {
-        const clientIds = await resolveSearchClientIds(userId, search);
-        const textFilter = buildSearchFilter(search, ['receiptNumber']);
-        const or = [...(textFilter?.$or || [])];
-        if (clientIds.length > 0) {
-            or.push({ clientId: { $in: clientIds } });
-        }
-        if (or.length > 0) {
-            filter.$or = or;
-        }
+    if (paymentStatus === 'partial') {
+        Object.assign(filter, buildReceiptPartialFilter());
+    } else if (paymentStatus === 'full') {
+        Object.assign(filter, buildReceiptFullFilter());
     }
 
-    const { data, total } = await paginateFind(Invoice, filter, {
-        skip,
-        limit,
-        sort,
-        select: '-items -notes',
-        lean: true,
-    });
+    filter = await mergeReceiptSearchFilter(filter, userId, search);
+
+    const [{ data, total }, statusCounts] = await Promise.all([
+        paginateFind(Invoice, filter, {
+            skip,
+            limit,
+            sort,
+            select: '-items -notes',
+            lean: true,
+        }),
+        getReceiptPaymentStatusCounts(userId),
+    ]);
 
     const withClients = await attachClientNames(data, userId);
     res.json({
         data: withClients,
         pagination: buildPaginationMeta(page, limit, total),
-        statusCounts: { all: total },
+        statusCounts,
     });
 }));
 

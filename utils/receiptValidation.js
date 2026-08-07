@@ -223,3 +223,52 @@ export function applyReceiptPayment(receipt, paymentInput) {
         amountPaid,
     };
 }
+
+/** Mongo filter: standalone receipt with amount received below line-item total. */
+export function buildReceiptPartialFilter() {
+    return {
+        $expr: {
+            $and: [
+                { $gt: [{ $ifNull: ['$amountPaid', 0] }, MONEY_EPS] },
+                {
+                    $gt: [
+                        {
+                            $subtract: [
+                                { $ifNull: ['$total', 0] },
+                                { $ifNull: ['$amountPaid', 0] },
+                            ],
+                        },
+                        MONEY_EPS,
+                    ],
+                },
+            ],
+        },
+    };
+}
+
+/** Mongo filter: issued receipt fully settled (matches UI "Fully received"). */
+export function buildReceiptFullFilter() {
+    return {
+        $expr: {
+            $or: [
+                {
+                    $gte: [
+                        { $ifNull: ['$amountPaid', 0] },
+                        {
+                            $subtract: [
+                                { $ifNull: ['$total', 0] },
+                                MONEY_EPS,
+                            ],
+                        },
+                    ],
+                },
+                {
+                    $and: [
+                        { $lte: [{ $ifNull: ['$amountPaid', 0] }, MONEY_EPS] },
+                        { $gt: [{ $ifNull: ['$total', 0] }, 0] },
+                    ],
+                },
+            ],
+        },
+    };
+}
