@@ -30,3 +30,13 @@ export async function incrementDocumentSequence(userId, field, computeSeedMax) {
     }
     return doc[field];
 }
+
+/**
+ * Preview the next sequence value without consuming it.
+ * Must stay in sync with incrementDocumentSequence seed/increment logic.
+ */
+export async function peekDocumentSequence(userId, field, computeSeedMax) {
+    const doc = await DocumentCounter.findOne({ userId }).lean();
+    if (doc) return (doc[field] || 0) + 1;
+    return (await computeSeedMax(userId)) + 1;
+}

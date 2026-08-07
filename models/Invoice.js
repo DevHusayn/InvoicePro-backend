@@ -69,6 +69,8 @@ const invoiceSchema = new mongoose.Schema({
     lastPaymentReminderAt: { type: Date, default: null },
     /** Set when the invoice notification is emailed to the client. */
     clientInvoiceEmailedAt: { type: Date, default: null },
+    /** Set when a standalone receipt is emailed to the client. */
+    clientReceiptEmailedAt: { type: Date, default: null },
     /** Set when this invoice was created by converting a quotation (skips quota). */
     sourceQuotationId: {
         type: mongoose.Schema.Types.ObjectId,

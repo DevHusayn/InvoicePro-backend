@@ -65,3 +65,8 @@ export {
     dispatchQuotationEmailToClient,
     tryAutoEmailQuotation,
 } from './helpers/quotationDispatch.js';
+
+export {
+    dispatchReceiptEmailToClient,
+    tryAutoEmailReceipt,
+} from './helpers/receiptDispatch.js';

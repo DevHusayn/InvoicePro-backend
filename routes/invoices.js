@@ -8,8 +8,8 @@ import {
     reserveInvoiceCreation,
     releaseInvoiceCreation,
 } from '../utils/invoiceLimits.js';
-import { getNextInvoiceNumber } from '../utils/invoiceNumber.js';
-import { getNextReceiptNumber } from '../utils/receiptNumber.js';
+import { getNextInvoiceNumber, peekNextInvoiceNumber } from '../utils/invoiceNumber.js';
+import { getNextReceiptNumber, peekNextReceiptNumber } from '../utils/receiptNumber.js';
 import {
     normalizeInvoicePayload,
     assignDocumentNumbers,
@@ -260,20 +260,20 @@ router.get('/drafts', auth, asyncHandler(async (req, res) => {
 // Next sequential invoice number for this user (INV-0001, …)
 router.get('/next-number', auth, async (req, res) => {
     try {
-        const invoiceNumber = await getNextInvoiceNumber(req.user.userId);
+        const invoiceNumber = await peekNextInvoiceNumber(req.user.userId);
         res.json({ invoiceNumber });
     } catch (err) {
-        res.status(500).json({ message: err.message || 'Could not generate invoice number' });
+        res.status(500).json({ message: err.message || 'Could not preview invoice number' });
     }
 });
 
 // Next sequential receipt number for this user (RCP-0001, …)
 router.get('/next-receipt-number', auth, async (req, res) => {
     try {
-        const receiptNumber = await getNextReceiptNumber(req.user.userId);
+        const receiptNumber = await peekNextReceiptNumber(req.user.userId);
         res.json({ receiptNumber });
     } catch (err) {
-        res.status(500).json({ message: err.message || 'Could not generate receipt number' });
+        res.status(500).json({ message: err.message || 'Could not preview receipt number' });
     }
 });
 

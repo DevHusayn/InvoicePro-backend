@@ -8,7 +8,7 @@ import {
     reserveInvoiceCreation,
     releaseInvoiceCreation,
 } from '../utils/invoiceLimits.js';
-import { getNextReceiptNumber } from '../utils/receiptNumber.js';
+import { getNextReceiptNumber, peekNextReceiptNumber } from '../utils/receiptNumber.js';
 import {
     normalizeReceiptPayload,
     assignReceiptNumbers,
@@ -21,18 +21,12 @@ import {
     applyReceiptPayment,
 } from '../utils/receiptValidation.js';
 import { RECEIPT_ONLY_FILTER } from '../utils/invoiceDocumentFilter.js';
-import { attachPublicTokenIfNeeded, ensureInvoicePublicToken } from '../utils/invoicePublicToken.js';
+import { attachPublicTokenIfNeeded } from '../utils/invoicePublicToken.js';
 import {
-    sendReceiptEmail,
+    dispatchReceiptEmailToClient,
+    tryAutoEmailReceipt,
     getEmailErrorMessage,
-    notifyOwnerInvoiceReceiptSent,
 } from '../src/emails/index.js';
-import {
-    loadInvoiceEmailContext,
-    buildReceiptUrl,
-    formatPaymentMethod,
-} from '../src/emails/helpers/invoiceContext.js';
-import { getInvoiceAmountPaid } from '../utils/invoicePayments.js';
 import asyncHandler from '../middleware/asyncHandler.js';
 import mongoose from 'mongoose';
 import {
@@ -115,10 +109,10 @@ async function resolveSearchClientIds(userId, search) {
 
 router.get('/next-number', auth, async (req, res) => {
     try {
-        const receiptNumber = await getNextReceiptNumber(req.user.userId);
+        const receiptNumber = await peekNextReceiptNumber(req.user.userId);
         res.json({ receiptNumber });
     } catch (err) {
-        res.status(500).json({ message: err.message || 'Could not generate receipt number' });
+        res.status(500).json({ message: err.message || 'Could not preview receipt number' });
     }
 });
 
@@ -183,6 +177,9 @@ router.post('/', auth, requireEmailVerified, async (req, res) => {
             ...payload,
             userId: req.user.userId,
         });
+        if (payload.status === PAID) {
+            await tryAutoEmailReceipt({ receipt, userId: req.user.userId });
+        }
         res.status(201).json(receipt);
     } catch (err) {
         if (err.status === 400) {
@@ -251,6 +248,10 @@ router.put('/:id', auth, requireEmailVerified, validateObjectId(), async (req, r
             { new: true }
         );
 
+        if (isFinalizingReceiptDraft(existing, normalized) && receipt.status === PAID) {
+            await tryAutoEmailReceipt({ receipt, userId: req.user.userId });
+        }
+
         res.json(receipt);
     } catch (err) {
         if (reserved) {
@@ -310,31 +311,12 @@ router.post('/:id/send-receipt', auth, requireEmailVerified, validateObjectId(),
             return res.status(400).json({ message: 'This receipt does not have a receipt number.' });
         }
 
-        await ensureInvoicePublicToken(receipt);
-        const ctx = await loadInvoiceEmailContext(receipt, req.user.userId);
-
-        await sendReceiptEmail({
-            to: ctx.to,
-            customerName: ctx.customerName,
-            invoiceNumber: receipt.invoiceNumber || undefined,
-            receiptNumber: receipt.receiptNumber,
-            amountPaid: getInvoiceAmountPaid(receipt) || receipt.total,
-            currency: receipt.currency || 'NGN',
-            paymentDate: receipt.datePaid || new Date(),
-            paymentMethod: formatPaymentMethod(receipt.paymentMethod),
-            businessName: ctx.businessName,
-            branding: ctx.branding,
-            receiptUrl: buildReceiptUrl(receipt),
-        });
-
-        await notifyOwnerInvoiceReceiptSent({
+        const result = await dispatchReceiptEmailToClient({
+            receipt,
             userId: req.user.userId,
-            invoice: receipt,
-            clientEmail: ctx.to,
-            customerName: ctx.customerName,
         });
 
-        res.json({ message: 'Receipt email sent.', sentTo: ctx.to });
+        res.json({ message: 'Receipt email sent.', sentTo: result.sentTo });
     } catch (err) {
         if (err.status === 400 || err.status === 404) {
             return res.status(err.status).json({ message: err.message });

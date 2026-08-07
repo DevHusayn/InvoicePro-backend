@@ -1,5 +1,5 @@
 import Invoice from '../models/Invoice.js';
-import { incrementDocumentSequence } from './documentCounter.js';
+import { incrementDocumentSequence, peekDocumentSequence } from './documentCounter.js';
 
 const INV_PREFIX = 'INV';
 const RCP_PREFIX = 'RCP';
@@ -39,6 +39,12 @@ async function seedInvoiceSequenceMax(userId) {
  */
 export async function getNextInvoiceNumber(userId) {
     const next = await incrementDocumentSequence(userId, 'invoiceSeq', seedInvoiceSequenceMax);
+    return `${INV_PREFIX}-${String(next).padStart(4, '0')}`;
+}
+
+/** Preview next invoice number without allocating it. */
+export async function peekNextInvoiceNumber(userId) {
+    const next = await peekDocumentSequence(userId, 'invoiceSeq', seedInvoiceSequenceMax);
     return `${INV_PREFIX}-${String(next).padStart(4, '0')}`;
 }
 
