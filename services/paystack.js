@@ -57,7 +57,6 @@ export async function initializeTransaction({ email, amountKobo, reference, call
         reference,
         callback_url: callbackUrl,
         metadata,
-        channels: ['card', 'bank', 'ussd', 'bank_transfer'],
     };
     if (planCode) {
         body.plan = planCode;
