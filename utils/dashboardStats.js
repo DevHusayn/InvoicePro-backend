@@ -7,6 +7,7 @@ import { getDraftCountForUser } from './documentDrafts.js';
 import { getInvoiceUsageForUser } from './invoiceLimits.js';
 import { toBusinessInfoResponse } from './businessInfoHelpers.js';
 import { getCache, setCache, invalidateCache } from './cache.js';
+import { INVOICE_ONLY_FILTER, RECEIPT_ONLY_FILTER } from './invoiceDocumentFilter.js';
 
 const DASHBOARD_CACHE_TTL_MS = 30_000;
 const OVERDUE_LIMIT = 20;
@@ -53,7 +54,20 @@ async function getInvoiceRevenueStats(userId) {
         {
             $group: {
                 _id: null,
-                totalInvoices: { $sum: 1 },
+                totalInvoices: {
+                    $sum: {
+                        $cond: [
+                            {
+                                $or: [
+                                    { $eq: ['$documentType', 'invoice'] },
+                                    { $not: ['$documentType'] },
+                                ],
+                            },
+                            1,
+                            0,
+                        ],
+                    },
+                },
                 paidRevenue: {
                     $sum: {
                         $cond: [
@@ -165,14 +179,21 @@ export async function getDashboardForUser(userId) {
     const [
         revenueStats,
         recentInvoicesRaw,
+        recentReceiptsRaw,
         recentQuotationsRaw,
         overdueRaw,
         draftCount,
         totalClients,
         totalQuotations,
+        totalReceipts,
     ] = await Promise.all([
         getInvoiceRevenueStats(userId),
-        Invoice.find(nonDraftFilter)
+        Invoice.find({ ...nonDraftFilter, ...INVOICE_ONLY_FILTER })
+            .select(INVOICE_SUMMARY_FIELDS)
+            .sort({ createdAt: -1 })
+            .limit(5)
+            .lean(),
+        Invoice.find({ ...nonDraftFilter, ...RECEIPT_ONLY_FILTER })
             .select(INVOICE_SUMMARY_FIELDS)
             .sort({ createdAt: -1 })
             .limit(5)
@@ -182,7 +203,7 @@ export async function getDashboardForUser(userId) {
             .sort({ createdAt: -1 })
             .limit(5)
             .lean(),
-        Invoice.find({ userId: uid, status: 'overdue' })
+        Invoice.find({ userId: uid, status: 'overdue', ...INVOICE_ONLY_FILTER })
             .select(INVOICE_SUMMARY_FIELDS)
             .sort({ dueDate: 1 })
             .limit(OVERDUE_LIMIT)
@@ -190,6 +211,7 @@ export async function getDashboardForUser(userId) {
         getDraftCountForUser(userId),
         Client.countDocuments({ userId: uid }),
         Quotation.countDocuments(nonDraftFilter),
+        Invoice.countDocuments({ userId: uid, status: 'paid', ...RECEIPT_ONLY_FILTER }),
     ]);
 
     const invoiceDocs = recentInvoicesRaw.map((inv) => ({
@@ -197,13 +219,18 @@ export async function getDashboardForUser(userId) {
         documentType: 'invoice',
         displayNumber: inv.invoiceNumber || '',
     }));
+    const receiptDocs = recentReceiptsRaw.map((rec) => ({
+        ...rec,
+        documentType: 'receipt',
+        displayNumber: rec.receiptNumber || '',
+    }));
     const quotationDocs = recentQuotationsRaw.map((q) => ({
         ...q,
         documentType: 'quotation',
         displayNumber: q.quotationNumber || '',
     }));
 
-    const mergedRecent = [...invoiceDocs, ...quotationDocs]
+    const mergedRecent = [...invoiceDocs, ...receiptDocs, ...quotationDocs]
         .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
         .slice(0, 5);
 
@@ -218,6 +245,7 @@ export async function getDashboardForUser(userId) {
         stats: {
             totalInvoices: revenueStats.totalInvoices,
             totalQuotations,
+            totalReceipts,
             totalClients,
             paidRevenue: revenueStats.paidRevenue,
             pendingRevenue: revenueStats.pendingRevenue,

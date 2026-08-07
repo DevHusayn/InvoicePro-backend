@@ -58,6 +58,7 @@ import {
     buildSearchFilter,
     escapeRegex,
 } from '../utils/pagination.js';
+import { INVOICE_ONLY_FILTER } from '../utils/invoiceDocumentFilter.js';
 
 const router = express.Router();
 
@@ -113,7 +114,7 @@ async function attachClientNames(invoices, userId) {
 async function getInvoiceStatusCounts(userId) {
     const uid = toUserObjectId(userId);
     const rows = await Invoice.aggregate([
-        { $match: { userId: uid, status: { $ne: 'draft' } } },
+        { $match: { userId: uid, status: { $ne: 'draft' }, ...INVOICE_ONLY_FILTER } },
         { $group: { _id: '$status', count: { $sum: 1 } } },
     ]);
     const statusCounts = { all: 0, pending: 0, partial: 0, paid: 0, overdue: 0, cancelled: 0 };
@@ -173,7 +174,7 @@ router.get('/', auth, asyncHandler(async (req, res) => {
     const year = Number.parseInt(String(req.query.year || ''), 10);
     const month = Number.parseInt(String(req.query.month || ''), 10);
 
-    const filter = { userId, status: { $ne: 'draft' } };
+    const filter = { userId, status: { $ne: 'draft' }, ...INVOICE_ONLY_FILTER };
     if (status && status !== 'all') {
         filter.status = status;
     }
@@ -228,7 +229,7 @@ router.get('/drafts', auth, asyncHandler(async (req, res) => {
     const { page, limit, skip } = parsePagination(req);
     const search = String(req.query.search || '').trim();
 
-    const filter = { userId, status: 'draft' };
+    const filter = { userId, status: 'draft', ...INVOICE_ONLY_FILTER };
     if (search) {
         const clientIds = await resolveInvoiceSearchClientIds(userId, search);
         const textFilter = buildSearchFilter(search, ['invoiceNumber', 'receiptNumber']);
@@ -326,6 +327,9 @@ router.get('/:id', auth, validateObjectId(), asyncHandler(async (req, res) => {
         userId: req.user.userId,
     });
     if (!invoice) return res.status(404).json({ message: 'Invoice not found' });
+    if (invoice.documentType === 'receipt') {
+        return res.status(404).json({ message: 'Invoice not found' });
+    }
 
     const needsBackfill =
         invoice.status === PAID &&
@@ -383,6 +387,9 @@ router.put('/:id', auth, requireEmailVerified, validateObjectId(), async (req, r
             userId: req.user.userId,
         });
         if (!existing) return res.status(404).json({ message: 'Invoice not found' });
+        if (existing.documentType === 'receipt') {
+            return res.status(404).json({ message: 'Invoice not found' });
+        }
 
         const normalized = normalizeInvoicePayload(req.body, { existing });
         if (isFinalizingDraft(existing, normalized)) {
@@ -620,6 +627,9 @@ router.post('/:id/send-receipt', auth, requireEmailVerified, validateObjectId(),
 router.delete('/:id', auth, requireEmailVerified, validateObjectId(), asyncHandler(async (req, res) => {
     const invoice = await Invoice.findOne({ _id: req.params.id, userId: req.user.userId });
     if (!invoice) return res.status(404).json({ message: 'Invoice not found' });
+    if (invoice.documentType === 'receipt') {
+        return res.status(404).json({ message: 'Invoice not found' });
+    }
 
     assertInvoiceDeleteAllowed(invoice);
 

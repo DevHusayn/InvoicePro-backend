@@ -1,0 +1,167 @@
+import { sanitizeInvoicePayload } from './invoiceValidation.js';
+import { getNextReceiptNumber } from './receiptNumber.js';
+import { roundMoney, MONEY_EPS } from './invoicePayments.js';
+
+const PAYMENT_METHODS = ['cash', 'bank_transfer', 'pos', 'card', 'online_gateway'];
+const DRAFT = 'draft';
+const PAID = 'paid';
+const RECEIPT_STATUSES = [DRAFT, PAID];
+
+function validationError(message, status = 400) {
+    const err = new Error(message);
+    err.status = status;
+    return err;
+}
+
+export function isReceiptDocument(doc) {
+    return doc?.documentType === 'receipt';
+}
+
+export function isDraftStatus(status) {
+    return status === DRAFT;
+}
+
+export function isFinalizingReceiptDraft(existing, payload) {
+    return existing?.status === DRAFT && payload.status === PAID;
+}
+
+/** Block deletion of issued receipts. */
+export function assertReceiptDeleteAllowed(existing) {
+    if (!existing) return;
+    const status = existing.status || DRAFT;
+    if (status === PAID) {
+        throw validationError('Issued receipts cannot be deleted.');
+    }
+}
+
+/** Block edits on issued receipts. */
+export function assertReceiptUpdateAllowed(existing, payload) {
+    const prev = existing?.status || DRAFT;
+    const next = payload.status ?? prev;
+
+    if (prev === DRAFT) {
+        if (next !== DRAFT && next !== PAID) {
+            throw validationError('Receipts can only be saved as draft or issued (paid).');
+        }
+        return;
+    }
+
+    if (prev === PAID) {
+        throw validationError('Issued receipts cannot be modified.');
+    }
+}
+
+export function normalizeReceiptPayload(body, { isCreate = false, existing = null } = {}) {
+    const data = sanitizeInvoicePayload(body);
+    let status = data.status || (isCreate ? DRAFT : PAID);
+
+    if (isCreate) {
+        status = data.status === DRAFT ? DRAFT : PAID;
+        data.status = status;
+        if (status === DRAFT) {
+            delete data.paymentMethod;
+            delete data.datePaid;
+        }
+    }
+
+    if (!isCreate && existing) {
+        assertReceiptUpdateAllowed(existing, data);
+        status = data.status ?? existing.status ?? DRAFT;
+        data.status = status;
+    }
+
+    if (status !== DRAFT && status !== PAID) {
+        throw validationError('Receipts can only be saved as draft or issued (paid).');
+    }
+
+    // Standalone receipts do not use due dates or recurring fields.
+    delete data.dueDate;
+    data.isRecurring = false;
+    delete data.recurringFrequency;
+    delete data.recurringEndDate;
+
+    if (status === DRAFT) {
+        delete data.paymentMethod;
+        delete data.receiptNumber;
+        delete data.datePaid;
+        delete data.invoiceNumber;
+        if (!data.clientId) {
+            data.clientId = null;
+        }
+    } else if (status === PAID) {
+        if (!data.paymentMethod || !PAYMENT_METHODS.includes(data.paymentMethod)) {
+            throw validationError(
+                'Payment method is required to issue a receipt (cash, bank_transfer, pos, card, or online_gateway).'
+            );
+        }
+        if (!data.datePaid) {
+            data.datePaid = new Date().toISOString().slice(0, 10);
+        }
+    }
+
+    data.documentType = 'receipt';
+    data.status = status;
+    return data;
+}
+
+/** Assign receipt number for issued receipts; never assign invoice number. */
+export async function assignReceiptNumbers(payload, existing, userId, generators = {}) {
+    const { getNextReceiptNumber: nextReceipt = getNextReceiptNumber } = generators;
+    const status = payload.status || DRAFT;
+    const result = { ...payload, documentType: 'receipt' };
+
+    delete result.invoiceNumber;
+
+    if (status === DRAFT) {
+        delete result.receiptNumber;
+        return result;
+    }
+
+    result.receiptNumber =
+        existing?.receiptNumber || (await nextReceipt(userId));
+    return result;
+}
+
+/** Populate payment ledger when a receipt is issued. */
+export function applyReceiptPaymentLedger(doc, { amount } = {}) {
+    if (!doc || doc.status !== PAID) return doc;
+
+    const total = roundMoney(doc.total);
+    let paidAmount =
+        amount !== undefined && amount !== null && amount !== ''
+            ? roundMoney(amount)
+            : total;
+
+    if (!Number.isFinite(paidAmount) || paidAmount <= 0) {
+        throw validationError('Payment amount must be greater than zero.');
+    }
+    if (paidAmount > total + MONEY_EPS) {
+        throw validationError(`Payment amount cannot exceed the total (${total.toFixed(2)}).`);
+    }
+    if (paidAmount > total) {
+        paidAmount = total;
+    }
+
+    doc.payments = [
+        {
+            amount: paidAmount,
+            method: doc.paymentMethod,
+            date: doc.datePaid,
+            note: '',
+            createdAt: new Date(),
+        },
+    ];
+    doc.amountPaid = paidAmount;
+    return doc;
+}
+
+export function resolveReceiptPaymentAmount(body, docTotal) {
+    if (body?.paidInFull === false || body?.paidInFull === 'false') {
+        const raw = body.paymentAmount ?? body.amountPaid;
+        if (raw === undefined || raw === null || raw === '') {
+            throw validationError('Enter the amount received.');
+        }
+        return roundMoney(raw);
+    }
+    return roundMoney(docTotal);
+}

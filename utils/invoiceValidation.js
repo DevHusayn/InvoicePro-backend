@@ -1,6 +1,9 @@
 import { getNextInvoiceNumber, receiptFromInvoiceNumber } from './invoiceNumber.js';
 import { isValidObjectId, sanitizeNumber, sanitizePlainText } from './sanitize.js';
 import { getInvoiceAmountPaid } from './invoicePayments.js';
+import { INVOICE_ONLY_FILTER } from './invoiceDocumentFilter.js';
+
+export { INVOICE_ONLY_FILTER };
 
 const PAYMENT_METHODS = ['cash', 'bank_transfer', 'pos', 'card', 'online_gateway'];
 const PAID = 'paid';
@@ -291,16 +294,18 @@ export function normalizeInvoicePayload(body, { isCreate = false, existing = nul
     }
 
     data.status = status;
+    data.documentType = 'invoice';
     return data;
 }
 
-/**
- * Assign invoice/receipt numbers based on status and existing record.
- */
 export async function assignDocumentNumbers(payload, existing, userId, generators) {
     const { getNextInvoiceNumber } = generators;
     const status = payload.status || 'pending';
     const result = { ...payload };
+
+    if (payload.documentType === 'receipt') {
+        throw validationError('Use the receipts API for standalone receipts.');
+    }
 
     if (status === DRAFT) {
         delete result.invoiceNumber;

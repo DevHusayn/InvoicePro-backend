@@ -3,6 +3,13 @@ import mongoose from 'mongoose';
 const invoiceSchema = new mongoose.Schema({
     userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     clientId: { type: mongoose.Schema.Types.ObjectId, ref: 'Client', required: false, default: null },
+    /** invoice = bill for payment; receipt = standalone payment record (no invoice). */
+    documentType: {
+        type: String,
+        enum: ['invoice', 'receipt'],
+        default: 'invoice',
+        index: true,
+    },
     invoiceNumber: String,
     receiptNumber: String,
     /** Unguessable token for public client invoice view (no login). */
@@ -75,6 +82,7 @@ invoiceSchema.index({ userId: 1, status: 1, dueDate: 1 });
 invoiceSchema.index({ userId: 1, status: 1, createdAt: -1 });
 invoiceSchema.index({ userId: 1, clientId: 1 });
 invoiceSchema.index({ userId: 1, invoiceNumber: 1 }, { unique: true, sparse: true });
+invoiceSchema.index({ userId: 1, receiptNumber: 1 }, { unique: true, sparse: true });
 invoiceSchema.index({ userId: 1, status: 1 });
 invoiceSchema.index({ status: 1, dueDate: 1 });
 invoiceSchema.index({ isRecurring: 1, recurringEndDate: 1 });

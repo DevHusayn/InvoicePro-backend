@@ -3,6 +3,7 @@ import Invoice from '../models/Invoice.js';
 import Quotation from '../models/Quotation.js';
 import Client from '../models/Client.js';
 import { buildSearchFilter, escapeRegex } from './pagination.js';
+import { INVOICE_ONLY_FILTER, RECEIPT_ONLY_FILTER } from './invoiceDocumentFilter.js';
 
 function toUserObjectId(userId) {
     if (userId instanceof mongoose.Types.ObjectId) return userId;
@@ -51,8 +52,8 @@ async function attachClientNames(docs, userId) {
     });
 }
 
-function buildDraftFilter(userId, search, clientIds, numberFields) {
-    const filter = { userId, status: 'draft' };
+function buildDraftFilter(userId, search, clientIds, numberFields, extra = {}) {
+    const filter = { userId, status: 'draft', ...extra };
     if (!search) return filter;
 
     const textFilter = buildSearchFilter(search, numberFields);
@@ -69,15 +70,16 @@ function buildDraftFilter(userId, search, clientIds, numberFields) {
 /** Combined draft count for sidebar badge / meta. */
 export async function getDraftCountForUser(userId) {
     const uid = toUserObjectId(userId);
-    const [invoiceDrafts, quotationDrafts] = await Promise.all([
-        Invoice.countDocuments({ userId: uid, status: 'draft' }),
+    const [invoiceDrafts, receiptDrafts, quotationDrafts] = await Promise.all([
+        Invoice.countDocuments({ userId: uid, status: 'draft', ...INVOICE_ONLY_FILTER }),
+        Invoice.countDocuments({ userId: uid, status: 'draft', ...RECEIPT_ONLY_FILTER }),
         Quotation.countDocuments({ userId: uid, status: 'draft' }),
     ]);
-    return invoiceDrafts + quotationDrafts;
+    return invoiceDrafts + receiptDrafts + quotationDrafts;
 }
 
 /**
- * Merged invoice + quotation drafts, newest first.
+ * Merged invoice + receipt + quotation drafts, newest first.
  * Drafts are typically few, so fetch-then-slice is accurate for pagination.
  */
 export async function getMergedDraftsForUser(userId, { skip = 0, limit = 20, search = '' } = {}) {
@@ -85,14 +87,16 @@ export async function getMergedDraftsForUser(userId, { skip = 0, limit = 20, sea
     const q = String(search || '').trim();
     const clientIds = q ? await resolveSearchClientIds(uid, q) : [];
 
-    const invoiceFilter = buildDraftFilter(uid, q, clientIds, [
-        'invoiceNumber',
-        'receiptNumber',
-    ]);
+    const invoiceFilter = buildDraftFilter(uid, q, clientIds, ['invoiceNumber', 'receiptNumber'], INVOICE_ONLY_FILTER);
+    const receiptFilter = buildDraftFilter(uid, q, clientIds, ['receiptNumber'], RECEIPT_ONLY_FILTER);
     const quotationFilter = buildDraftFilter(uid, q, clientIds, ['quotationNumber']);
 
-    const [invoiceRaw, quotationRaw] = await Promise.all([
+    const [invoiceRaw, receiptRaw, quotationRaw] = await Promise.all([
         Invoice.find(invoiceFilter)
+            .select('-items -notes')
+            .sort({ updatedAt: -1 })
+            .lean(),
+        Invoice.find(receiptFilter)
             .select('-items -notes')
             .sort({ updatedAt: -1 })
             .lean(),
@@ -107,13 +111,18 @@ export async function getMergedDraftsForUser(userId, { skip = 0, limit = 20, sea
         documentType: 'invoice',
         id: inv._id?.toString?.() || inv._id,
     }));
+    const receiptDocs = receiptRaw.map((rec) => ({
+        ...rec,
+        documentType: 'receipt',
+        id: rec._id?.toString?.() || rec._id,
+    }));
     const quotationDocs = quotationRaw.map((qt) => ({
         ...qt,
         documentType: 'quotation',
         id: qt._id?.toString?.() || qt._id,
     }));
 
-    const merged = [...invoiceDocs, ...quotationDocs].sort(
+    const merged = [...invoiceDocs, ...receiptDocs, ...quotationDocs].sort(
         (a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt)
     );
 
