@@ -1,6 +1,13 @@
 import { sanitizeInvoicePayload } from './invoiceValidation.js';
 import { getNextReceiptNumber } from './receiptNumber.js';
-import { roundMoney, MONEY_EPS } from './invoicePayments.js';
+import {
+    roundMoney,
+    MONEY_EPS,
+    sanitizePaymentPayload,
+    getInvoiceBalanceDue,
+    sumPayments,
+    ensurePaymentLedger,
+} from './invoicePayments.js';
 
 const PAYMENT_METHODS = ['cash', 'bank_transfer', 'pos', 'card', 'online_gateway'];
 const DRAFT = 'draft';
@@ -164,4 +171,55 @@ export function resolveReceiptPaymentAmount(body, docTotal) {
         return roundMoney(raw);
     }
     return roundMoney(docTotal);
+}
+
+/**
+ * Append an installment to a standalone receipt (mutates in-memory fields; caller saves).
+ * Issued receipts keep status `paid`; partial vs fully paid is derived from amountPaid vs total.
+ */
+export function applyReceiptPayment(receipt, paymentInput) {
+    if (!isReceiptDocument(receipt)) {
+        throw validationError('Receipt not found.');
+    }
+    if (receipt.status !== PAID) {
+        throw validationError('Payments can only be recorded on issued receipts.');
+    }
+
+    ensurePaymentLedger(receipt);
+
+    const balanceDue = getInvoiceBalanceDue(receipt);
+    if (balanceDue <= MONEY_EPS) {
+        throw validationError('This receipt is already fully paid.');
+    }
+
+    const payment = {
+        ...sanitizePaymentPayload(paymentInput),
+        createdAt: new Date(),
+    };
+
+    if (payment.amount > balanceDue + MONEY_EPS) {
+        throw validationError(
+            `Payment amount exceeds the balance due (${balanceDue.toFixed(2)}).`
+        );
+    }
+    if (payment.amount > balanceDue) {
+        payment.amount = balanceDue;
+    }
+
+    const payments = [...(receipt.payments || []), payment];
+    const amountPaid = sumPayments(payments);
+    const total = roundMoney(receipt.total);
+
+    receipt.payments = payments;
+    receipt.amountPaid = amountPaid;
+    receipt.paymentMethod = payment.method;
+    receipt.datePaid = payment.date;
+    receipt.status = PAID;
+
+    return {
+        becameFullyPaid: amountPaid + MONEY_EPS >= total && total >= 0,
+        payment,
+        balanceDue: getInvoiceBalanceDue(receipt),
+        amountPaid,
+    };
 }

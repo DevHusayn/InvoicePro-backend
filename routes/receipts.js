@@ -18,6 +18,7 @@ import {
     applyReceiptPaymentLedger,
     resolveReceiptPaymentAmount,
     isReceiptDocument,
+    applyReceiptPayment,
 } from '../utils/receiptValidation.js';
 import { RECEIPT_ONLY_FILTER } from '../utils/invoiceDocumentFilter.js';
 import { attachPublicTokenIfNeeded, ensureInvoicePublicToken } from '../utils/invoicePublicToken.js';
@@ -266,6 +267,31 @@ router.put('/:id', auth, requireEmailVerified, validateObjectId(), async (req, r
             });
         }
         res.status(500).json({ message: err.message || 'Could not update receipt' });
+    }
+});
+
+router.post('/:id/payments', auth, requireEmailVerified, validateObjectId(), async (req, res) => {
+    try {
+        const receipt = await Invoice.findOne({
+            _id: req.params.id,
+            userId: req.user.userId,
+            ...RECEIPT_ONLY_FILTER,
+        });
+        assertReceiptRecord(receipt);
+        if (receipt.status !== PAID) {
+            return res.status(400).json({ message: 'Payments can only be recorded on issued receipts.' });
+        }
+
+        applyReceiptPayment(receipt, req.body);
+        await receipt.save();
+
+        res.json(receipt);
+    } catch (err) {
+        if (err.status === 400) {
+            return res.status(400).json({ message: err.message });
+        }
+        console.error('Record receipt payment error:', err);
+        res.status(500).json({ message: err.message || 'Could not record payment' });
     }
 });
 
