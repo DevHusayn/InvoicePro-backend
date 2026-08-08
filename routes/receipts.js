@@ -38,6 +38,7 @@ import {
     buildSearchFilter,
     escapeRegex,
 } from '../utils/pagination.js';
+import { countListSummary, buildSummaryResponse, resolveListSummaryOptions } from '../utils/listSummary.js';
 
 const router = express.Router();
 
@@ -164,7 +165,9 @@ router.get('/', auth, asyncHandler(async (req, res) => {
 
     filter = await mergeReceiptSearchFilter(filter, userId, search);
 
-    const [{ data, total }, statusCounts] = await Promise.all([
+    const summaryOpts = await resolveListSummaryOptions(req, userId);
+
+    const [{ data, total }, statusCounts, summaryCounts] = await Promise.all([
         paginateFind(Invoice, filter, {
             skip,
             limit,
@@ -173,6 +176,7 @@ router.get('/', auth, asyncHandler(async (req, res) => {
             lean: true,
         }),
         getReceiptPaymentStatusCounts(userId),
+        countListSummary(Invoice, { userId, ...RECEIPT_LIST_BASE }, summaryOpts),
     ]);
 
     const withClients = await attachClientNames(data, userId);
@@ -180,6 +184,7 @@ router.get('/', auth, asyncHandler(async (req, res) => {
         data: withClients,
         pagination: buildPaginationMeta(page, limit, total),
         statusCounts,
+        summary: buildSummaryResponse('totalReceipts', summaryCounts.total, summaryCounts),
     });
 }));
 

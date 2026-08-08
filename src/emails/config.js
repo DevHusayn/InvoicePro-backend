@@ -59,6 +59,13 @@ export function getLogoUrl() {
     return `${getWebsiteUrl()}/logo.png`;
 }
 
+/** Circular W mark for email lockups (icon + wordmark). */
+export function getLogoIconUrl() {
+    const explicit = process.env.EMAIL_LOGO_ICON_URL?.trim();
+    if (explicit) return explicit;
+    return `${getWebsiteUrl()}/logo-icon.png`;
+}
+
 export function getCopyrightYear() {
     return new Date().getFullYear();
 }

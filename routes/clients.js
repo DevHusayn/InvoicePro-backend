@@ -10,12 +10,14 @@ import {
     buildPaginationMeta,
     buildSearchFilter,
 } from '../utils/pagination.js';
+import { countListSummary, buildSummaryResponse, resolveListSummaryOptions } from '../utils/listSummary.js';
 
 const router = express.Router();
 
 router.get('/', auth, asyncHandler(async (req, res) => {
+    const userId = req.user.userId;
     const { page, limit, skip } = parsePagination(req);
-    const filter = { userId: req.user.userId };
+    const filter = { userId };
     const searchFilter = buildSearchFilter(req.query.search, [
         'name',
         'email',
@@ -24,15 +26,24 @@ router.get('/', auth, asyncHandler(async (req, res) => {
     ]);
     if (searchFilter) Object.assign(filter, searchFilter);
 
-    const { data, total } = await paginateFind(Client, filter, {
-        skip,
-        limit,
-        sort: { name: 1 },
-        lean: true,
-    });
+    const [{ data, total }, summaryCounts] = await Promise.all([
+        paginateFind(Client, filter, {
+            skip,
+            limit,
+            sort: { name: 1 },
+            lean: true,
+        }),
+        (async () => {
+            const summaryOpts = await resolveListSummaryOptions(req, userId);
+            const counts = await countListSummary(Client, { userId }, summaryOpts);
+            return counts;
+        })(),
+    ]);
+
     res.json({
         data,
         pagination: buildPaginationMeta(page, limit, total),
+        summary: buildSummaryResponse('totalClients', summaryCounts.total, summaryCounts),
     });
 }));
 

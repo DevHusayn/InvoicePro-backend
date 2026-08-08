@@ -5,12 +5,13 @@ import {
     Head,
     Hr,
     Html,
+    Img,
     Link,
     Preview,
     Section,
     Text,
 } from '@react-email/components';
-import { BRAND, getCopyrightYear, getSupportEmail, getWebsiteUrl } from '../config.js';
+import { BRAND, getCopyrightYear, getLogoIconUrl, getSupportEmail, getWebsiteUrl } from '../config.js';
 
 const BODONI_MODA_STYLESHEET =
     'https://fonts.googleapis.com/css2?family=Bodoni+Moda:opsz,wght@6..96,600&display=swap';
@@ -26,6 +27,7 @@ export default function EmailLayout({ preview, children }) {
     const websiteUrl = getWebsiteUrl();
     const supportEmail = getSupportEmail();
     const year = getCopyrightYear();
+    const logoIconUrl = getLogoIconUrl();
 
     return React.createElement(
         Html,
@@ -51,7 +53,39 @@ export default function EmailLayout({ preview, children }) {
                     React.createElement(
                         Link,
                         { href: websiteUrl, style: styles.logoLink },
-                        React.createElement(Text, { style: styles.logoText }, BRAND.name),
+                        React.createElement(
+                            'table',
+                            {
+                                role: 'presentation',
+                                cellPadding: 0,
+                                cellSpacing: 0,
+                                style: styles.logoTable,
+                            },
+                            React.createElement(
+                                'tbody',
+                                null,
+                                React.createElement(
+                                    'tr',
+                                    null,
+                                    React.createElement(
+                                        'td',
+                                        { style: styles.logoIconCell },
+                                        React.createElement(Img, {
+                                            src: logoIconUrl,
+                                            alt: '',
+                                            width: 36,
+                                            height: 36,
+                                            style: styles.logoIcon,
+                                        }),
+                                    ),
+                                    React.createElement(
+                                        'td',
+                                        { style: styles.logoTextCell },
+                                        React.createElement(Text, { style: styles.logoText }, BRAND.name),
+                                    ),
+                                ),
+                            ),
+                        ),
                     ),
                 ),
                 React.createElement(Section, { style: styles.content }, children),
@@ -181,6 +215,23 @@ const styles = {
     logoLink: {
         display: 'inline-block',
         textDecoration: 'none',
+    },
+    logoTable: {
+        margin: '0 auto',
+        borderCollapse: 'collapse',
+    },
+    logoIconCell: {
+        verticalAlign: 'middle',
+        padding: 0,
+    },
+    logoTextCell: {
+        verticalAlign: 'middle',
+        padding: '0 0 0 4px',
+    },
+    logoIcon: {
+        display: 'block',
+        border: 0,
+        outline: 'none',
     },
     /** Matches in-app WaraqahWordmark: Bodoni Moda, semibold, brand-hover, no italic. */
     logoText: {

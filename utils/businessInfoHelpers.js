@@ -1,4 +1,5 @@
 import { sanitizePlainText, sanitizeOptionalEmail, sanitizeHexColor, sanitizeNumber, sanitizeDataUrl } from './sanitize.js';
+import { normalizeTimezone } from './timezone.js';
 
 export const PLANS = {
     FREE: 'free',
@@ -35,6 +36,7 @@ const ALLOWED_UPDATE_FIELDS = [
     'email',
     'phone',
     'website',
+    'timezone',
     'taxRate',
     'brandColor',
     'businessLogo',
@@ -174,6 +176,10 @@ export function pickAllowedBusinessUpdates(body, { allowPlan = false, premium = 
         updates.autoPaymentReminders = Boolean(updates.autoPaymentReminders);
     }
 
+    if (updates.timezone !== undefined) {
+        updates.timezone = normalizeTimezone(updates.timezone);
+    }
+
     for (const key of ['paymentAccountName', 'paymentBankName', 'paymentAccountNumber', 'paymentInstructions']) {
         if (updates[key] !== undefined) {
             updates[key] = sanitizePlainText(updates[key], TEXT_LIMITS[key]);
@@ -236,6 +242,7 @@ export function toBusinessInfoResponse(doc, { includeAssets = true } = {}) {
         email: o.email || '',
         phone: o.phone || '',
         website: o.website || '',
+        timezone: normalizeTimezone(o.timezone),
         defaultCurrency: 'NGN',
         taxRate: typeof o.taxRate === 'number' ? o.taxRate : 10,
         brandColor: o.brandColor || '#16A34A',
@@ -293,6 +300,7 @@ export const defaultBusinessInfoFields = {
     email: '',
     phone: '',
     website: '',
+    timezone: 'Africa/Lagos',
     defaultCurrency: 'NGN',
     taxRate: 10,
     brandColor: '#16A34A',

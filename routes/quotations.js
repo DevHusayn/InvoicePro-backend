@@ -38,6 +38,7 @@ import {
     buildSearchFilter,
     escapeRegex,
 } from '../utils/pagination.js';
+import { countListSummary, buildSummaryResponse, resolveListSummaryOptions } from '../utils/listSummary.js';
 
 const router = express.Router();
 
@@ -165,7 +166,10 @@ router.get('/', auth, asyncHandler(async (req, res) => {
         }
     }
 
-    const [{ data, total }, statusCounts] = await Promise.all([
+    const listBase = { userId, status: { $ne: 'draft' } };
+    const summaryOpts = await resolveListSummaryOptions(req, userId);
+
+    const [{ data, total }, statusCounts, summaryCounts] = await Promise.all([
         paginateFind(Quotation, filter, {
             skip,
             limit,
@@ -174,6 +178,7 @@ router.get('/', auth, asyncHandler(async (req, res) => {
             lean: true,
         }),
         getQuotationStatusCounts(userId),
+        countListSummary(Quotation, listBase, summaryOpts),
     ]);
 
     const withClients = await attachClientNames(data, userId);
@@ -181,6 +186,7 @@ router.get('/', auth, asyncHandler(async (req, res) => {
         data: withClients,
         pagination: buildPaginationMeta(page, limit, total),
         statusCounts,
+        summary: buildSummaryResponse('totalQuotations', summaryCounts.total, summaryCounts),
     });
 }));
 

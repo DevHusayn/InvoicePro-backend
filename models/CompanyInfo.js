@@ -8,6 +8,8 @@ const businessInfoSchema = new mongoose.Schema({
     phone: String,
     website: String,
     defaultCurrency: { type: String, default: 'NGN' },
+    /** IANA timezone for business reporting (monthly stats, statements). */
+    timezone: { type: String, default: 'Africa/Lagos' },
     taxRate: { type: Number, default: 10 },
     brandColor: { type: String, default: '#16A34A' },
     plan: { type: String, enum: ['free', 'premium'], default: 'free' },
