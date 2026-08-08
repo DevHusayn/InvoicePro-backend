@@ -64,6 +64,7 @@ function sanitizePublicBusiness(info) {
 
 function sanitizePublicInvoice(invoice) {
     return {
+        documentType: invoice.documentType || 'invoice',
         invoiceNumber: invoice.invoiceNumber,
         receiptNumber: invoice.receiptNumber || null,
         status: invoice.status,

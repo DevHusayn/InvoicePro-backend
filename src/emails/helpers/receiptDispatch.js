@@ -7,7 +7,7 @@ import {
     formatPaymentMethod,
 } from './invoiceContext.js';
 import { ensureInvoicePublicToken } from '../../../utils/invoicePublicToken.js';
-import { getInvoiceAmountPaid } from '../../../utils/invoicePayments.js';
+import { getInvoiceAmountPaid, getInvoiceBalanceDue } from '../../../utils/invoicePayments.js';
 import { isReceiptDocument } from '../../../utils/receiptValidation.js';
 
 export async function shouldAutoEmailReceipts(userId) {
@@ -29,12 +29,17 @@ export async function dispatchReceiptEmailToClient({
     await ensureInvoicePublicToken(receipt);
     const ctx = await loadInvoiceEmailContext(receipt, userId);
 
+    const amountPaid = getInvoiceAmountPaid(receipt) || receipt.total;
+    const balanceDue = getInvoiceBalanceDue(receipt);
+
     await sendReceiptEmail({
         to: ctx.to,
         customerName: ctx.customerName,
         invoiceNumber: receipt.invoiceNumber || undefined,
         receiptNumber: receipt.receiptNumber,
-        amountPaid: getInvoiceAmountPaid(receipt) || receipt.total,
+        amountPaid,
+        totalAmount: receipt.total,
+        balanceDue,
         currency: receipt.currency || 'NGN',
         paymentDate: receipt.datePaid || new Date(),
         paymentMethod: formatPaymentMethod(receipt.paymentMethod),

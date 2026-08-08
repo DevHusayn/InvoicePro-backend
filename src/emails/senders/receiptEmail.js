@@ -26,6 +26,8 @@ export async function sendReceiptEmail({
     invoiceNumber,
     receiptNumber,
     amountPaid,
+    totalAmount,
+    balanceDue,
     currency = 'NGN',
     paymentDate,
     paymentMethod,
@@ -34,6 +36,11 @@ export async function sendReceiptEmail({
     branding,
 }) {
     const brand = branding || buildClientEmailBranding(null, businessName);
+    const resolvedBalance =
+        balanceDue != null
+            ? Number(balanceDue)
+            : Math.max(0, Number(totalAmount || 0) - Number(amountPaid || 0));
+    const isPartial = resolvedBalance > 0.009;
 
     return sendEmail({
         to,
@@ -45,6 +52,8 @@ export async function sendReceiptEmail({
             invoiceNumber,
             receiptNumber,
             amountPaid,
+            totalAmount,
+            balanceDue: resolvedBalance,
             currency,
             paymentDate,
             paymentMethod,
@@ -56,7 +65,11 @@ export async function sendReceiptEmail({
             `Receipt ${receiptNumber} from ${brand.businessName}`,
             invoiceNumber ? `Invoice: ${invoiceNumber}` : null,
             '',
-            `Amount paid: ${formatCurrency(amountPaid, currency)}`,
+            isPartial && totalAmount != null
+                ? `Receipt total: ${formatCurrency(totalAmount, currency)}`
+                : null,
+            `${isPartial ? 'Amount received' : 'Amount paid'}: ${formatCurrency(amountPaid, currency)}`,
+            isPartial ? `Balance remaining: ${formatCurrency(resolvedBalance, currency)}` : null,
             `Payment date: ${formatDate(paymentDate)}`,
             paymentMethod ? `Payment method: ${paymentMethod}` : null,
             receiptUrl ? `\nView receipt: ${receiptUrl}` : null,
