@@ -42,6 +42,15 @@ router.post('/', auth, asyncHandler(async (req, res) => {
     res.status(201).json(client);
 }));
 
+router.get('/:id', auth, validateObjectId(), asyncHandler(async (req, res) => {
+    const client = await Client.findOne({
+        _id: req.params.id,
+        userId: req.user.userId,
+    }).lean();
+    if (!client) return res.status(404).json({ message: 'Client not found' });
+    res.json(client);
+}));
+
 router.put('/:id', auth, validateObjectId(), asyncHandler(async (req, res) => {
     const updates = sanitizeClientUpdates(req.body);
     const client = await Client.findOneAndUpdate(

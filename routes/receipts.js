@@ -229,6 +229,29 @@ router.post('/', auth, requireEmailVerified, async (req, res) => {
     }
 });
 
+async function attachClientToReceipt(receipt, userId) {
+    const doc = typeof receipt.toObject === 'function' ? receipt.toObject() : { ...receipt };
+    if (!doc.clientId) {
+        doc.client = null;
+        return doc;
+    }
+    const client = await Client.findOne({ _id: doc.clientId, userId })
+        .select('name email company phone address')
+        .lean();
+    doc.client = client
+        ? {
+            _id: client._id,
+            id: String(client._id),
+            name: client.name || '',
+            email: client.email || '',
+            company: client.company || '',
+            phone: client.phone || '',
+            address: client.address || '',
+        }
+        : null;
+    return doc;
+}
+
 router.get('/:id', auth, validateObjectId(), asyncHandler(async (req, res) => {
     const receipt = await Invoice.findOne({
         _id: req.params.id,
@@ -236,7 +259,7 @@ router.get('/:id', auth, validateObjectId(), asyncHandler(async (req, res) => {
         ...RECEIPT_ONLY_FILTER,
     });
     if (!receipt) return res.status(404).json({ message: 'Receipt not found' });
-    res.json(receipt);
+    res.json(await attachClientToReceipt(receipt, req.user.userId));
 }));
 
 router.put('/:id', auth, requireEmailVerified, validateObjectId(), async (req, res) => {
@@ -316,7 +339,7 @@ router.post('/:id/payments', auth, requireEmailVerified, validateObjectId(), asy
         applyReceiptPayment(receipt, req.body);
         await receipt.save();
 
-        res.json(receipt);
+        res.json(await attachClientToReceipt(receipt, req.user.userId));
     } catch (err) {
         if (err.status === 400) {
             return res.status(400).json({ message: err.message });
