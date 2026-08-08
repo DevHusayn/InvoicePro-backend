@@ -8,6 +8,7 @@ import { getInvoiceUsageForUser } from './invoiceLimits.js';
 import { toBusinessInfoResponse } from './businessInfoHelpers.js';
 import { getCache, setCache, invalidateCache } from './cache.js';
 import { INVOICE_ONLY_FILTER, RECEIPT_ONLY_FILTER } from './invoiceDocumentFilter.js';
+import { MONEY_EPS } from './invoicePayments.js';
 
 const DASHBOARD_CACHE_TTL_MS = 30_000;
 const OVERDUE_LIMIT = 20;
@@ -44,6 +45,28 @@ function amountPaidOf(inv) {
 
 function balanceDueOf(inv) {
     return Math.max(0, roundMoney(inv.total) - amountPaidOf(inv));
+}
+
+/** Pending balance for one non-draft document (mirrors aggregation rules). */
+export function computePendingBalance(doc) {
+    if (!doc || doc.status === 'draft' || doc.status === 'cancelled') return 0;
+
+    const balance = balanceDueOf(doc);
+
+    if (['pending', 'partial', 'overdue'].includes(doc.status)) {
+        return balance;
+    }
+
+    if (
+        doc.documentType === 'receipt' &&
+        doc.status === 'paid' &&
+        roundMoney(doc.amountPaid) > MONEY_EPS &&
+        balance > MONEY_EPS
+    ) {
+        return balance;
+    }
+
+    return 0;
 }
 
 /** Revenue totals via aggregation — avoids loading every invoice into memory. */
@@ -99,41 +122,61 @@ async function getInvoiceRevenueStats(userId) {
                 },
                 pendingRevenue: {
                     $sum: {
-                        $cond: [
-                            { $in: ['$status', ['pending', 'partial', 'overdue']] },
-                            {
-                                $max: [
-                                    0,
-                                    {
-                                        $subtract: [
-                                            { $ifNull: ['$total', 0] },
+                        $let: {
+                            vars: {
+                                total: { $ifNull: ['$total', 0] },
+                                paid: { $ifNull: ['$amountPaid', 0] },
+                                effectivePaid: {
+                                    $cond: [
+                                        { $gt: ['$$paid', 0] },
+                                        '$$paid',
+                                        {
+                                            $cond: [
+                                                { $eq: ['$status', 'paid'] },
+                                                '$$total',
+                                                0,
+                                            ],
+                                        },
+                                    ],
+                                },
+                            },
+                            in: {
+                                $let: {
+                                    vars: {
+                                        balance: {
+                                            $max: [
+                                                0,
+                                                { $subtract: ['$$total', '$$effectivePaid'] },
+                                            ],
+                                        },
+                                    },
+                                    in: {
+                                        $cond: [
                                             {
-                                                $let: {
-                                                    vars: {
-                                                        paid: { $ifNull: ['$amountPaid', 0] },
-                                                        total: { $ifNull: ['$total', 0] },
-                                                    },
-                                                    in: {
-                                                        $cond: [
-                                                            { $gt: ['$$paid', 0] },
-                                                            '$$paid',
-                                                            {
-                                                                $cond: [
-                                                                    { $eq: ['$status', 'paid'] },
-                                                                    '$$total',
-                                                                    0,
-                                                                ],
-                                                            },
+                                                $or: [
+                                                    {
+                                                        $in: [
+                                                            '$status',
+                                                            ['pending', 'partial', 'overdue'],
                                                         ],
                                                     },
-                                                },
+                                                    {
+                                                        $and: [
+                                                            { $eq: ['$documentType', 'receipt'] },
+                                                            { $eq: ['$status', 'paid'] },
+                                                            { $gt: ['$$paid', MONEY_EPS] },
+                                                            { $gt: ['$$balance', MONEY_EPS] },
+                                                        ],
+                                                    },
+                                                ],
                                             },
+                                            '$$balance',
+                                            0,
                                         ],
                                     },
-                                ],
+                                },
                             },
-                            0,
-                        ],
+                        },
                     },
                 },
             },
