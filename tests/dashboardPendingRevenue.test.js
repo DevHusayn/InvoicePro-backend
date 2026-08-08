@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { computePendingBalance } from '../utils/dashboardStats.js';
+import { computePendingBalance, computePaidRevenue } from '../utils/dashboardStats.js';
 
 test('computePendingBalance includes unpaid invoice balances', () => {
     assert.equal(
@@ -31,6 +31,21 @@ test('computePendingBalance excludes fully paid receipts', () => {
     );
     assert.equal(
         computePendingBalance({ documentType: 'receipt', status: 'paid', total: 1000, amountPaid: 0 }),
+        0
+    );
+});
+
+test('computePaidRevenue includes invoice and receipt payments', () => {
+    assert.equal(
+        computePaidRevenue({ documentType: 'invoice', status: 'paid', total: 5000, amountPaid: 0 }),
+        5000
+    );
+    assert.equal(
+        computePaidRevenue({ documentType: 'receipt', status: 'paid', total: 1000, amountPaid: 400 }),
+        400
+    );
+    assert.equal(
+        computePaidRevenue({ documentType: 'invoice', status: 'cancelled', total: 1000, amountPaid: 0 }),
         0
     );
 });

@@ -69,125 +69,35 @@ export function computePendingBalance(doc) {
     return 0;
 }
 
-/** Revenue totals via aggregation — avoids loading every invoice into memory. */
+/** Paid amount counted toward revenue (mirrors aggregation rules). */
+export function computePaidRevenue(doc) {
+    if (!doc || doc.status === 'cancelled' || doc.status === 'draft') return 0;
+    return amountPaidOf(doc);
+}
+
+/** Revenue totals — computed in JS for clarity and to avoid aggregation $let scoping issues. */
 async function getInvoiceRevenueStats(userId) {
     const uid = toUserObjectId(userId);
-    const rows = await Invoice.aggregate([
-        { $match: { userId: uid, status: { $ne: 'draft' } } },
-        {
-            $group: {
-                _id: null,
-                totalInvoices: {
-                    $sum: {
-                        $cond: [
-                            {
-                                $or: [
-                                    { $eq: ['$documentType', 'invoice'] },
-                                    { $not: ['$documentType'] },
-                                ],
-                            },
-                            1,
-                            0,
-                        ],
-                    },
-                },
-                paidRevenue: {
-                    $sum: {
-                        $cond: [
-                            { $in: ['$status', ['cancelled', 'draft']] },
-                            0,
-                            {
-                                $let: {
-                                    vars: {
-                                        paid: { $ifNull: ['$amountPaid', 0] },
-                                        total: { $ifNull: ['$total', 0] },
-                                    },
-                                    in: {
-                                        $cond: [
-                                            { $gt: ['$$paid', 0] },
-                                            '$$paid',
-                                            {
-                                                $cond: [
-                                                    { $eq: ['$status', 'paid'] },
-                                                    '$$total',
-                                                    0,
-                                                ],
-                                            },
-                                        ],
-                                    },
-                                },
-                            },
-                        ],
-                    },
-                },
-                pendingRevenue: {
-                    $sum: {
-                        $let: {
-                            vars: {
-                                total: { $ifNull: ['$total', 0] },
-                                paid: { $ifNull: ['$amountPaid', 0] },
-                                effectivePaid: {
-                                    $cond: [
-                                        { $gt: ['$$paid', 0] },
-                                        '$$paid',
-                                        {
-                                            $cond: [
-                                                { $eq: ['$status', 'paid'] },
-                                                '$$total',
-                                                0,
-                                            ],
-                                        },
-                                    ],
-                                },
-                            },
-                            in: {
-                                $let: {
-                                    vars: {
-                                        balance: {
-                                            $max: [
-                                                0,
-                                                { $subtract: ['$$total', '$$effectivePaid'] },
-                                            ],
-                                        },
-                                    },
-                                    in: {
-                                        $cond: [
-                                            {
-                                                $or: [
-                                                    {
-                                                        $in: [
-                                                            '$status',
-                                                            ['pending', 'partial', 'overdue'],
-                                                        ],
-                                                    },
-                                                    {
-                                                        $and: [
-                                                            { $eq: ['$documentType', 'receipt'] },
-                                                            { $eq: ['$status', 'paid'] },
-                                                            { $gt: ['$$paid', MONEY_EPS] },
-                                                            { $gt: ['$$balance', MONEY_EPS] },
-                                                        ],
-                                                    },
-                                                ],
-                                            },
-                                            '$$balance',
-                                            0,
-                                        ],
-                                    },
-                                },
-                            },
-                        },
-                    },
-                },
-            },
-        },
-    ]);
+    const docs = await Invoice.find({ userId: uid, status: { $ne: 'draft' } })
+        .select('documentType status total amountPaid')
+        .lean();
 
-    const row = rows[0] || { totalInvoices: 0, paidRevenue: 0, pendingRevenue: 0 };
+    let totalInvoices = 0;
+    let paidRevenue = 0;
+    let pendingRevenue = 0;
+
+    for (const doc of docs) {
+        const isInvoice = doc.documentType === 'invoice' || doc.documentType == null;
+        if (isInvoice) totalInvoices += 1;
+
+        paidRevenue += computePaidRevenue(doc);
+        pendingRevenue += computePendingBalance(doc);
+    }
+
     return {
-        totalInvoices: row.totalInvoices || 0,
-        paidRevenue: roundMoney(row.paidRevenue),
-        pendingRevenue: roundMoney(row.pendingRevenue),
+        totalInvoices,
+        paidRevenue: roundMoney(paidRevenue),
+        pendingRevenue: roundMoney(pendingRevenue),
     };
 }
 
