@@ -6,9 +6,15 @@ import BusinessInfo from '../models/CompanyInfo.js';
 import { getDraftCountForUser } from './documentDrafts.js';
 import { getInvoiceUsageForUser } from './invoiceLimits.js';
 import { toBusinessInfoResponse } from './businessInfoHelpers.js';
-import { getCache, setCache, invalidateCache } from './cache.js';
+import { getCache, setCache, invalidateCachePrefix } from './cache.js';
 import { INVOICE_ONLY_FILTER, RECEIPT_ONLY_FILTER } from './invoiceDocumentFilter.js';
 import { MONEY_EPS } from './invoicePayments.js';
+import {
+    buildDashboardAnalyticsFromDocs,
+    buildPeriodSummaryFromDocs,
+    computeRevenueStatsFromDocs,
+} from './dashboardAnalytics.js';
+import { getBusinessTimezone, parseSummaryPeriodQuery } from './timezone.js';
 
 const DASHBOARD_CACHE_TTL_MS = 30_000;
 const OVERDUE_LIMIT = 20;
@@ -82,23 +88,7 @@ async function getInvoiceRevenueStats(userId) {
         .select('documentType status total amountPaid')
         .lean();
 
-    let totalInvoices = 0;
-    let paidRevenue = 0;
-    let pendingRevenue = 0;
-
-    for (const doc of docs) {
-        const isInvoice = doc.documentType === 'invoice' || doc.documentType == null;
-        if (isInvoice) totalInvoices += 1;
-
-        paidRevenue += computePaidRevenue(doc);
-        pendingRevenue += computePendingBalance(doc);
-    }
-
-    return {
-        totalInvoices,
-        paidRevenue: roundMoney(paidRevenue),
-        pendingRevenue: roundMoney(pendingRevenue),
-    };
+    return computeRevenueStatsFromDocs(docs);
 }
 
 async function attachClientNames(docs) {
@@ -125,12 +115,13 @@ async function attachClientNames(docs) {
 }
 
 /** Core dashboard payload — stats, recent documents, overdue alerts. */
-export async function getDashboardForUser(userId) {
+export async function getDashboardForUser(userId, { summaryYear, summaryMonth } = {}) {
     const uid = toUserObjectId(userId);
     const nonDraftFilter = { userId: uid, status: { $ne: 'draft' } };
 
     const [
-        revenueStats,
+        analyticsDocs,
+        timeZone,
         recentInvoicesRaw,
         recentReceiptsRaw,
         recentQuotationsRaw,
@@ -140,7 +131,10 @@ export async function getDashboardForUser(userId) {
         totalQuotations,
         totalReceipts,
     ] = await Promise.all([
-        getInvoiceRevenueStats(userId),
+        Invoice.find(nonDraftFilter)
+            .select('date status total amountPaid documentType')
+            .lean(),
+        getBusinessTimezone(userId),
         Invoice.find({ ...nonDraftFilter, ...INVOICE_ONLY_FILTER })
             .select(INVOICE_SUMMARY_FIELDS)
             .sort({ createdAt: -1 })
@@ -187,6 +181,14 @@ export async function getDashboardForUser(userId) {
         .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
         .slice(0, 5);
 
+    const revenueStats = computeRevenueStatsFromDocs(analyticsDocs);
+    const analytics = buildDashboardAnalyticsFromDocs(analyticsDocs, { timeZone });
+    const periodSummary = buildPeriodSummaryFromDocs(analyticsDocs, {
+        year: summaryYear,
+        month: summaryMonth,
+        timeZone,
+    });
+
     const [recentDocuments, overdueInvoices] = await Promise.all([
         attachClientNames(mergedRecent),
         attachClientNames(overdueRaw),
@@ -195,6 +197,8 @@ export async function getDashboardForUser(userId) {
     const recentInvoices = recentDocuments.filter((d) => d.documentType === 'invoice');
 
     return {
+        analytics,
+        periodSummary,
         stats: {
             totalInvoices: revenueStats.totalInvoices,
             totalQuotations,
@@ -211,15 +215,23 @@ export async function getDashboardForUser(userId) {
 }
 
 /** Full aggregated dashboard with subscription and business info. */
-export async function getFullDashboardForUser(userId) {
-    const cacheKey = String(userId);
+export async function getFullDashboardForUser(userId, { summaryYear, summaryMonth } = {}) {
+    const timeZone = await getBusinessTimezone(userId);
+    const resolvedPeriod = parseSummaryPeriodQuery(
+        { summaryYear, summaryMonth },
+        timeZone
+    );
+    const cacheKey = `${userId}:${resolvedPeriod.year}:${resolvedPeriod.month}`;
     const cached = getCache('dashboard', cacheKey);
     if (cached) return cached;
 
     const uid = toUserObjectId(userId);
 
     const [dashboard, invoiceUsage, businessDoc] = await Promise.all([
-        getDashboardForUser(userId),
+        getDashboardForUser(userId, {
+            summaryYear: resolvedPeriod.year,
+            summaryMonth: resolvedPeriod.month,
+        }),
         getInvoiceUsageForUser(userId),
         BusinessInfo.findOne({ userId: uid }).lean(),
     ]);
@@ -243,7 +255,7 @@ export async function getFullDashboardForUser(userId) {
 }
 
 export function invalidateDashboardCache(userId) {
-    invalidateCache('dashboard', String(userId));
+    invalidateCachePrefix('dashboard', String(userId));
 }
 
 /** Lightweight counts for app shell (sidebar draft badge). */

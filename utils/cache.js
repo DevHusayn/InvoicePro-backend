@@ -36,3 +36,14 @@ export function invalidateCache(namespace, key) {
     }
     store.delete(String(key));
 }
+
+/** Remove all entries in a namespace whose keys start with prefix. */
+export function invalidateCachePrefix(namespace, prefix) {
+    const store = getStore(namespace);
+    const needle = String(prefix);
+    for (const key of [...store.keys()]) {
+        if (key === needle || key.startsWith(`${needle}:`)) {
+            store.delete(key);
+        }
+    }
+}

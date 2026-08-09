@@ -60,6 +60,7 @@ import {
 } from '../utils/pagination.js';
 import { INVOICE_ONLY_FILTER } from '../utils/invoiceDocumentFilter.js';
 import { countListSummary, buildSummaryResponse, resolveListSummaryOptions } from '../utils/listSummary.js';
+import { getInvoiceStatusCounts } from '../utils/dashboardAnalytics.js';
 
 const router = express.Router();
 
@@ -110,23 +111,6 @@ async function attachClientNames(invoices, userId) {
             clientCompany: client?.company || null,
         };
     });
-}
-
-async function getInvoiceStatusCounts(userId) {
-    const uid = toUserObjectId(userId);
-    const rows = await Invoice.aggregate([
-        { $match: { userId: uid, status: { $ne: 'draft' }, ...INVOICE_ONLY_FILTER } },
-        { $group: { _id: '$status', count: { $sum: 1 } } },
-    ]);
-    const statusCounts = { all: 0, pending: 0, partial: 0, paid: 0, overdue: 0, cancelled: 0 };
-    for (const row of rows) {
-        const key = row._id;
-        if (key && Object.prototype.hasOwnProperty.call(statusCounts, key)) {
-            statusCounts[key] = row.count;
-        }
-        statusCounts.all += row.count;
-    }
-    return statusCounts;
 }
 
 async function resolveInvoiceSearchClientIds(userId, search) {
