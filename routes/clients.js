@@ -10,12 +10,23 @@ import {
     buildPaginationMeta,
     buildSearchFilter,
 } from '../utils/pagination.js';
-import { countListSummary, buildSummaryResponse, resolveListSummaryOptions } from '../utils/listSummary.js';
+import { countListSummary, buildSummaryResponse, resolveListSummaryOptions, isSummaryOnlyRequest, shouldFetchListSummary } from '../utils/listSummary.js';
+import { parseListMonthQuery } from '../utils/listMonthFilter.js';
+import { getBusinessTimezone, getUtcRangeForMonthInTimezone } from '../utils/timezone.js';
 
 const router = express.Router();
 
 router.get('/', auth, asyncHandler(async (req, res) => {
     const userId = req.user.userId;
+
+    if (isSummaryOnlyRequest(req.query)) {
+        const summaryOpts = await resolveListSummaryOptions(req, userId);
+        const summaryCounts = await countListSummary(Client, { userId }, summaryOpts);
+        return res.json({
+            summary: buildSummaryResponse('totalClients', summaryCounts.total, summaryCounts),
+        });
+    }
+
     const { page, limit, skip } = parsePagination(req);
     const filter = { userId };
     const searchFilter = buildSearchFilter(req.query.search, [
@@ -26,6 +37,20 @@ router.get('/', auth, asyncHandler(async (req, res) => {
     ]);
     if (searchFilter) Object.assign(filter, searchFilter);
 
+    const listMonth = parseListMonthQuery(req.query);
+    if (listMonth) {
+        const timeZone = await getBusinessTimezone(userId);
+        const { start, end } = getUtcRangeForMonthInTimezone(
+            listMonth.year,
+            listMonth.month,
+            timeZone
+        );
+        filter.createdAt = { $gte: start, $lt: end };
+    }
+
+    const includeSummary = shouldFetchListSummary(req.query);
+    const summaryOpts = includeSummary ? await resolveListSummaryOptions(req, userId) : null;
+
     const [{ data, total }, summaryCounts] = await Promise.all([
         paginateFind(Client, filter, {
             skip,
@@ -33,17 +58,17 @@ router.get('/', auth, asyncHandler(async (req, res) => {
             sort: { name: 1 },
             lean: true,
         }),
-        (async () => {
-            const summaryOpts = await resolveListSummaryOptions(req, userId);
-            const counts = await countListSummary(Client, { userId }, summaryOpts);
-            return counts;
-        })(),
+        includeSummary
+            ? countListSummary(Client, { userId }, summaryOpts)
+            : Promise.resolve(null),
     ]);
 
     res.json({
         data,
         pagination: buildPaginationMeta(page, limit, total),
-        summary: buildSummaryResponse('totalClients', summaryCounts.total, summaryCounts),
+        ...(summaryCounts
+            ? { summary: buildSummaryResponse('totalClients', summaryCounts.total, summaryCounts) }
+            : {}),
     });
 }));
 

@@ -59,8 +59,9 @@ import {
     escapeRegex,
 } from '../utils/pagination.js';
 import { INVOICE_ONLY_FILTER } from '../utils/invoiceDocumentFilter.js';
-import { countListSummary, buildSummaryResponse, resolveListSummaryOptions } from '../utils/listSummary.js';
+import { countListSummary, buildSummaryResponse, resolveListSummaryOptions, isSummaryOnlyRequest, shouldFetchListSummary } from '../utils/listSummary.js';
 import { getInvoiceStatusCounts } from '../utils/dashboardAnalytics.js';
+import { parseListMonthQuery, buildIssueDateMonthFilter } from '../utils/listMonthFilter.js';
 
 const router = express.Router();
 
@@ -151,25 +152,31 @@ router.get('/meta', auth, asyncHandler(async (req, res) => {
 // Paginated invoice list (non-drafts) — line items loaded on detail/edit
 router.get('/', auth, asyncHandler(async (req, res) => {
     const userId = req.user.userId;
+
+    if (isSummaryOnlyRequest(req.query)) {
+        const listBase = { userId, status: { $ne: 'draft' }, ...INVOICE_ONLY_FILTER };
+        const summaryOpts = await resolveListSummaryOptions(req, userId);
+        const summaryCounts = await countListSummary(Invoice, listBase, summaryOpts);
+        return res.json({
+            summary: buildSummaryResponse('totalInvoices', summaryCounts.total, summaryCounts),
+        });
+    }
+
     const { page, limit, skip } = parsePagination(req);
     const status = String(req.query.status || 'all').trim().toLowerCase();
     const sortKey = String(req.query.sort || 'newest').trim();
     const sort = INVOICE_SORT[sortKey] || INVOICE_SORT.newest;
     const search = String(req.query.search || '').trim();
-    const year = Number.parseInt(String(req.query.year || ''), 10);
-    const month = Number.parseInt(String(req.query.month || ''), 10);
+    const listMonth = parseListMonthQuery(req.query);
+    const dateFilter = listMonth ? buildIssueDateMonthFilter(listMonth.year, listMonth.month) : null;
 
     const filter = { userId, status: { $ne: 'draft' }, ...INVOICE_ONLY_FILTER };
     if (status && status !== 'all') {
         filter.status = status;
     }
 
-    if (Number.isFinite(year) && Number.isFinite(month) && month >= 1 && month <= 12) {
-        const startStr = `${year}-${String(month).padStart(2, '0')}-01`;
-        const nextMonth = month === 12 ? 1 : month + 1;
-        const nextYear = month === 12 ? year + 1 : year;
-        const endStr = `${nextYear}-${String(nextMonth).padStart(2, '0')}-01`;
-        filter.date = { $gte: startStr, $lt: endStr };
+    if (dateFilter) {
+        Object.assign(filter, dateFilter);
     }
 
     if (search) {
@@ -190,7 +197,8 @@ router.get('/', auth, asyncHandler(async (req, res) => {
     }
 
     const listBase = { userId, status: { $ne: 'draft' }, ...INVOICE_ONLY_FILTER };
-    const summaryOpts = await resolveListSummaryOptions(req, userId);
+    const includeSummary = shouldFetchListSummary(req.query);
+    const summaryOpts = includeSummary ? await resolveListSummaryOptions(req, userId) : null;
 
     const [{ data, total }, statusCounts, summaryCounts] = await Promise.all([
         paginateFind(Invoice, filter, {
@@ -200,8 +208,10 @@ router.get('/', auth, asyncHandler(async (req, res) => {
             select: '-items -notes',
             lean: true,
         }),
-        getInvoiceStatusCounts(userId),
-        countListSummary(Invoice, listBase, summaryOpts),
+        getInvoiceStatusCounts(userId, dateFilter || {}),
+        includeSummary
+            ? countListSummary(Invoice, listBase, summaryOpts)
+            : Promise.resolve(null),
     ]);
 
     const withClients = await attachClientNames(data, userId);
@@ -209,7 +219,9 @@ router.get('/', auth, asyncHandler(async (req, res) => {
         data: withClients,
         pagination: buildPaginationMeta(page, limit, total),
         statusCounts,
-        summary: buildSummaryResponse('totalInvoices', summaryCounts.total, summaryCounts),
+        ...(summaryCounts
+            ? { summary: buildSummaryResponse('totalInvoices', summaryCounts.total, summaryCounts) }
+            : {}),
     });
 }));
 

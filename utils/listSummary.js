@@ -11,6 +11,28 @@ export async function resolveListSummaryOptions(req, userId) {
     return { year, month, timeZone };
 }
 
+export function isSummaryOnlyRequest(query = {}) {
+    const raw = String(query.summaryOnly ?? '').trim().toLowerCase();
+    return raw === '1' || raw === 'true';
+}
+
+export function hasExplicitSummaryPeriodQuery(query = {}) {
+    const year = Number.parseInt(String(query.summaryYear ?? ''), 10);
+    const month = Number.parseInt(String(query.summaryMonth ?? ''), 10);
+    return (
+        Number.isFinite(year) &&
+        Number.isFinite(month) &&
+        month >= 1 &&
+        month <= 12 &&
+        year >= 1970 &&
+        year <= 2100
+    );
+}
+
+export function shouldFetchListSummary(query = {}) {
+    return isSummaryOnlyRequest(query) || hasExplicitSummaryPeriodQuery(query);
+}
+
 export async function countListSummary(Model, baseFilter, { year, month, timeZone } = {}) {
     const tz = timeZone;
     const resolved =

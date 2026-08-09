@@ -38,7 +38,8 @@ import {
     buildSearchFilter,
     escapeRegex,
 } from '../utils/pagination.js';
-import { countListSummary, buildSummaryResponse, resolveListSummaryOptions } from '../utils/listSummary.js';
+import { countListSummary, buildSummaryResponse, resolveListSummaryOptions, isSummaryOnlyRequest, shouldFetchListSummary } from '../utils/listSummary.js';
+import { parseListMonthQuery, buildIssueDateMonthFilter } from '../utils/listMonthFilter.js';
 
 const router = express.Router();
 
@@ -84,10 +85,10 @@ async function attachClientNames(quotations, userId) {
     });
 }
 
-async function getQuotationStatusCounts(userId) {
+async function getQuotationStatusCounts(userId, extraMatch = {}) {
     const uid = toUserObjectId(userId);
     const rows = await Quotation.aggregate([
-        { $match: { userId: uid, status: { $ne: 'draft' } } },
+        { $match: { userId: uid, status: { $ne: 'draft' }, ...extraMatch } },
         { $group: { _id: '$status', count: { $sum: 1 } } },
     ]);
     const statusCounts = {
@@ -143,15 +144,31 @@ router.get('/', auth, asyncHandler(async (req, res) => {
     await syncExpiredQuotationsForUser(req.user.userId);
 
     const userId = req.user.userId;
+
+    if (isSummaryOnlyRequest(req.query)) {
+        const listBase = { userId, status: { $ne: 'draft' } };
+        const summaryOpts = await resolveListSummaryOptions(req, userId);
+        const summaryCounts = await countListSummary(Quotation, listBase, summaryOpts);
+        return res.json({
+            summary: buildSummaryResponse('totalQuotations', summaryCounts.total, summaryCounts),
+        });
+    }
+
     const { page, limit, skip } = parsePagination(req);
     const status = String(req.query.status || 'all').trim().toLowerCase();
     const sortKey = String(req.query.sort || 'newest').trim();
     const sort = QUOTATION_SORT[sortKey] || QUOTATION_SORT.newest;
     const search = String(req.query.search || '').trim();
+    const listMonth = parseListMonthQuery(req.query);
+    const dateFilter = listMonth ? buildIssueDateMonthFilter(listMonth.year, listMonth.month) : null;
 
     const filter = { userId, status: { $ne: 'draft' } };
     if (status && status !== 'all') {
         filter.status = status;
+    }
+
+    if (dateFilter) {
+        Object.assign(filter, dateFilter);
     }
 
     if (search) {
@@ -167,7 +184,8 @@ router.get('/', auth, asyncHandler(async (req, res) => {
     }
 
     const listBase = { userId, status: { $ne: 'draft' } };
-    const summaryOpts = await resolveListSummaryOptions(req, userId);
+    const includeSummary = shouldFetchListSummary(req.query);
+    const summaryOpts = includeSummary ? await resolveListSummaryOptions(req, userId) : null;
 
     const [{ data, total }, statusCounts, summaryCounts] = await Promise.all([
         paginateFind(Quotation, filter, {
@@ -177,8 +195,10 @@ router.get('/', auth, asyncHandler(async (req, res) => {
             select: '-items -notes -terms',
             lean: true,
         }),
-        getQuotationStatusCounts(userId),
-        countListSummary(Quotation, listBase, summaryOpts),
+        getQuotationStatusCounts(userId, dateFilter || {}),
+        includeSummary
+            ? countListSummary(Quotation, listBase, summaryOpts)
+            : Promise.resolve(null),
     ]);
 
     const withClients = await attachClientNames(data, userId);
@@ -186,7 +206,9 @@ router.get('/', auth, asyncHandler(async (req, res) => {
         data: withClients,
         pagination: buildPaginationMeta(page, limit, total),
         statusCounts,
-        summary: buildSummaryResponse('totalQuotations', summaryCounts.total, summaryCounts),
+        ...(summaryCounts
+            ? { summary: buildSummaryResponse('totalQuotations', summaryCounts.total, summaryCounts) }
+            : {}),
     });
 }));
 

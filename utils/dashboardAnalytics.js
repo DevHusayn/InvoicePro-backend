@@ -1,8 +1,10 @@
 import mongoose from 'mongoose';
 import Invoice from '../models/Invoice.js';
-import { INVOICE_ONLY_FILTER, RECEIPT_ONLY_FILTER } from './invoiceDocumentFilter.js';
+import { INVOICE_ONLY_FILTER } from './invoiceDocumentFilter.js';
 import { computePaidRevenue, computePendingBalance } from './dashboardStats.js';
 import { getYearMonthInTimezone, normalizeTimezone } from './timezone.js';
+import { isPartialReceiptDoc } from './receiptValidation.js';
+import { getReceiptPaymentStatusCounts } from './receiptCounts.js';
 
 const DEFAULT_TREND_MONTHS = 12;
 
@@ -167,7 +169,7 @@ export function computePeriodSummaryFromDocs(docs, year, month, timeZone) {
         totalRevenue += computePaidRevenue(doc);
         outstanding += computePendingBalance(doc);
 
-        if (isReceiptDoc(doc) && doc.status === 'paid') {
+        if (isReceiptDoc(doc) && doc.status === 'paid' && !isPartialReceiptDoc(doc)) {
             receiptsIssued += 1;
         } else if (isInvoiceDoc(doc) && doc.status === 'paid') {
             paidInvoices += 1;
@@ -186,9 +188,10 @@ export function computePeriodSummaryFromDocs(docs, year, month, timeZone) {
 /** Status counts for invoices and receipts issued in a calendar month. */
 export function computePeriodPaymentBreakdownFromDocs(docs, year, month, timeZone) {
     const tz = normalizeTimezone(timeZone);
-    let paidInvoices = 0;
-    let receiptsIssued = 0;
-    let partial = 0;
+    let fullyPaidInvoices = 0;
+    let fullyPaidReceipts = 0;
+    let partialInvoices = 0;
+    let partialReceipts = 0;
     let pending = 0;
     let overdue = 0;
 
@@ -197,26 +200,36 @@ export function computePeriodPaymentBreakdownFromDocs(docs, year, month, timeZon
         if (doc.status === 'draft' || doc.status === 'cancelled') continue;
 
         if (isReceiptDoc(doc)) {
-            if (doc.status === 'paid') receiptsIssued += 1;
+            if (doc.status === 'paid') {
+                if (isPartialReceiptDoc(doc)) partialReceipts += 1;
+                else fullyPaidReceipts += 1;
+            }
             continue;
         }
 
         if (!isInvoiceDoc(doc)) continue;
 
-        if (doc.status === 'paid') paidInvoices += 1;
-        else if (doc.status === 'partial') partial += 1;
+        if (doc.status === 'paid') fullyPaidInvoices += 1;
+        else if (doc.status === 'partial') partialInvoices += 1;
         else if (doc.status === 'pending') pending += 1;
         else if (doc.status === 'overdue') overdue += 1;
     }
 
-    const total = paidInvoices + receiptsIssued + partial + pending + overdue;
+    const total =
+        fullyPaidInvoices +
+        fullyPaidReceipts +
+        partialInvoices +
+        partialReceipts +
+        pending +
+        overdue;
 
     return {
-        paidInvoices,
-        receiptsIssued,
-        partial,
+        partialInvoices,
+        partialReceipts,
         pending,
         overdue,
+        fullyPaidInvoices,
+        fullyPaidReceipts,
         total,
     };
 }
@@ -315,10 +328,10 @@ export async function getPeriodSummaryWithComparison(userId, { year, month, time
     return buildPeriodSummaryFromDocs(docs, { year, month, timeZone });
 }
 
-export async function getInvoiceStatusCounts(userId) {
+export async function getInvoiceStatusCounts(userId, extraMatch = {}) {
     const uid = toUserObjectId(userId);
     const rows = await Invoice.aggregate([
-        { $match: { userId: uid, status: { $ne: 'draft' }, ...INVOICE_ONLY_FILTER } },
+        { $match: { userId: uid, status: { $ne: 'draft' }, ...INVOICE_ONLY_FILTER, ...extraMatch } },
         { $group: { _id: '$status', count: { $sum: 1 } } },
     ]);
 
@@ -334,12 +347,13 @@ export async function getInvoiceStatusCounts(userId) {
 }
 
 /** Combined invoice + receipt counts for the dashboard payment breakdown. */
-export function buildPaymentBreakdown(invoiceStatusCounts, receiptsIssued) {
+export function buildPaymentBreakdown(invoiceStatusCounts, receiptCounts = {}) {
     const paidInvoices = invoiceStatusCounts?.paid ?? 0;
-    const partial = invoiceStatusCounts?.partial ?? 0;
+    const receiptPartial = receiptCounts?.partial ?? 0;
+    const partial = (invoiceStatusCounts?.partial ?? 0) + receiptPartial;
     const pending = invoiceStatusCounts?.pending ?? 0;
     const overdue = invoiceStatusCounts?.overdue ?? 0;
-    const receipts = receiptsIssued ?? 0;
+    const receipts = receiptCounts?.full ?? 0;
     const total = paidInvoices + receipts + partial + pending + overdue;
 
     return {
@@ -353,13 +367,12 @@ export function buildPaymentBreakdown(invoiceStatusCounts, receiptsIssued) {
 }
 
 export async function getPaymentBreakdown(userId) {
-    const uid = toUserObjectId(userId);
-    const [invoiceStatusCounts, receiptsIssued] = await Promise.all([
+    const [invoiceStatusCounts, receiptCounts] = await Promise.all([
         getInvoiceStatusCounts(userId),
-        Invoice.countDocuments({ userId: uid, status: 'paid', ...RECEIPT_ONLY_FILTER }),
+        getReceiptPaymentStatusCounts(userId),
     ]);
 
-    return buildPaymentBreakdown(invoiceStatusCounts, receiptsIssued);
+    return buildPaymentBreakdown(invoiceStatusCounts, receiptCounts);
 }
 
 export async function getRevenueTrend(userId, { months = DEFAULT_TREND_MONTHS, timeZone } = {}) {

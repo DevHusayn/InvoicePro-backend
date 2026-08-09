@@ -22,6 +22,8 @@ import {
     buildReceiptPartialFilter,
     buildReceiptFullFilter,
 } from '../utils/receiptValidation.js';
+import { getReceiptPaymentStatusCounts } from '../utils/receiptCounts.js';
+import { parseListMonthQuery, buildIssueDateMonthFilter } from '../utils/listMonthFilter.js';
 import { RECEIPT_ONLY_FILTER } from '../utils/invoiceDocumentFilter.js';
 import { attachPublicTokenIfNeeded } from '../utils/invoicePublicToken.js';
 import {
@@ -38,7 +40,7 @@ import {
     buildSearchFilter,
     escapeRegex,
 } from '../utils/pagination.js';
-import { countListSummary, buildSummaryResponse, resolveListSummaryOptions } from '../utils/listSummary.js';
+import { countListSummary, buildSummaryResponse, resolveListSummaryOptions, isSummaryOnlyRequest, shouldFetchListSummary } from '../utils/listSummary.js';
 
 const router = express.Router();
 
@@ -99,16 +101,6 @@ async function attachClientNames(receipts, userId) {
 
 const RECEIPT_LIST_BASE = { status: PAID, ...RECEIPT_ONLY_FILTER };
 
-async function getReceiptPaymentStatusCounts(userId) {
-    const uid = toUserObjectId(userId);
-    const base = { userId: uid, ...RECEIPT_LIST_BASE };
-    const [all, partial] = await Promise.all([
-        Invoice.countDocuments(base),
-        Invoice.countDocuments({ ...base, ...buildReceiptPartialFilter() }),
-    ]);
-    return { all, partial, full: Math.max(0, all - partial) };
-}
-
 async function mergeReceiptSearchFilter(filter, userId, search) {
     const q = String(search || '').trim();
     if (!q) return filter;
@@ -149,13 +141,32 @@ router.get('/next-number', auth, async (req, res) => {
 
 router.get('/', auth, asyncHandler(async (req, res) => {
     const userId = req.user.userId;
+
+    if (isSummaryOnlyRequest(req.query)) {
+        const summaryOpts = await resolveListSummaryOptions(req, userId);
+        const summaryCounts = await countListSummary(
+            Invoice,
+            { userId, ...RECEIPT_LIST_BASE },
+            summaryOpts
+        );
+        return res.json({
+            summary: buildSummaryResponse('totalReceipts', summaryCounts.total, summaryCounts),
+        });
+    }
+
     const { page, limit, skip } = parsePagination(req);
     const sortKey = String(req.query.sort || 'newest').trim();
     const sort = RECEIPT_SORT[sortKey] || RECEIPT_SORT.newest;
     const search = String(req.query.search || '').trim();
     const paymentStatus = String(req.query.status || 'all').trim().toLowerCase();
+    const listMonth = parseListMonthQuery(req.query);
+    const dateFilter = listMonth ? buildIssueDateMonthFilter(listMonth.year, listMonth.month) : null;
 
     let filter = { userId, ...RECEIPT_LIST_BASE };
+
+    if (dateFilter) {
+        Object.assign(filter, dateFilter);
+    }
 
     if (paymentStatus === 'partial') {
         Object.assign(filter, buildReceiptPartialFilter());
@@ -165,7 +176,8 @@ router.get('/', auth, asyncHandler(async (req, res) => {
 
     filter = await mergeReceiptSearchFilter(filter, userId, search);
 
-    const summaryOpts = await resolveListSummaryOptions(req, userId);
+    const includeSummary = shouldFetchListSummary(req.query);
+    const summaryOpts = includeSummary ? await resolveListSummaryOptions(req, userId) : null;
 
     const [{ data, total }, statusCounts, summaryCounts] = await Promise.all([
         paginateFind(Invoice, filter, {
@@ -175,8 +187,10 @@ router.get('/', auth, asyncHandler(async (req, res) => {
             select: '-items -notes',
             lean: true,
         }),
-        getReceiptPaymentStatusCounts(userId),
-        countListSummary(Invoice, { userId, ...RECEIPT_LIST_BASE }, summaryOpts),
+        getReceiptPaymentStatusCounts(userId, dateFilter || {}),
+        includeSummary
+            ? countListSummary(Invoice, { userId, ...RECEIPT_LIST_BASE }, summaryOpts)
+            : Promise.resolve(null),
     ]);
 
     const withClients = await attachClientNames(data, userId);
@@ -184,7 +198,9 @@ router.get('/', auth, asyncHandler(async (req, res) => {
         data: withClients,
         pagination: buildPaginationMeta(page, limit, total),
         statusCounts,
-        summary: buildSummaryResponse('totalReceipts', summaryCounts.total, summaryCounts),
+        ...(summaryCounts
+            ? { summary: buildSummaryResponse('totalReceipts', summaryCounts.total, summaryCounts) }
+            : {}),
     });
 }));
 

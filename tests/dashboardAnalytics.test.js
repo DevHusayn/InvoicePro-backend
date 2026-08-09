@@ -147,13 +147,13 @@ test('buildPaymentBreakdown combines invoice statuses and receipts', () => {
             cancelled: 2,
             all: 22,
         },
-        17
+        { full: 12, partial: 5, all: 17 }
     );
 
     assert.deepEqual(breakdown, {
         paidInvoices: 15,
-        receiptsIssued: 17,
-        partial: 5,
+        receiptsIssued: 12,
+        partial: 10,
         pending: 0,
         overdue: 0,
         total: 37,
@@ -236,6 +236,15 @@ test('computePeriodPaymentBreakdownFromDocs counts statuses for the selected iss
         {
             date: '2026-08-05T00:00:00.000Z',
             status: 'paid',
+            total: 1000,
+            amountPaid: 1000,
+            documentType: 'receipt',
+        },
+        {
+            date: '2026-08-06T00:00:00.000Z',
+            status: 'paid',
+            total: 1000,
+            amountPaid: 400,
             documentType: 'receipt',
         },
         {
@@ -253,13 +262,38 @@ test('computePeriodPaymentBreakdownFromDocs counts statuses for the selected iss
     const breakdown = computePeriodPaymentBreakdownFromDocs(docs, 2026, 8, 'UTC');
 
     assert.deepEqual(breakdown, {
-        paidInvoices: 1,
-        receiptsIssued: 1,
-        partial: 1,
+        partialInvoices: 1,
+        partialReceipts: 1,
         pending: 0,
         overdue: 0,
-        total: 3,
+        fullyPaidInvoices: 1,
+        fullyPaidReceipts: 1,
+        total: 4,
     });
+});
+
+test('computePeriodSummaryFromDocs counts only fully paid docs in paymentsReceived', () => {
+    const docs = [
+        {
+            date: '2026-02-12T00:00:00.000Z',
+            status: 'paid',
+            total: 800,
+            amountPaid: 800,
+            documentType: 'receipt',
+        },
+        {
+            date: '2026-02-13T00:00:00.000Z',
+            status: 'paid',
+            total: 1000,
+            amountPaid: 300,
+            documentType: 'receipt',
+        },
+    ];
+
+    const summary = computePeriodSummaryFromDocs(docs, 2026, 2, 'UTC');
+
+    assert.equal(summary.receiptsIssued, 1);
+    assert.equal(summary.paymentsReceived, 1);
 });
 
 test('computePercentChange handles zero and near-zero baselines', () => {

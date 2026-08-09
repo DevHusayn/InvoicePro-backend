@@ -224,6 +224,17 @@ export function applyReceiptPayment(receipt, paymentInput) {
     };
 }
 
+/** Standalone receipt with amount received below line-item total (in-memory check). */
+export function isPartialReceiptDoc(doc) {
+    if (!isReceiptDocument(doc)) return false;
+    if (doc.status === 'draft' || doc.status === 'cancelled') return false;
+    const total = roundMoney(doc?.total);
+    if (total <= 0) return false;
+    const paid = roundMoney(doc?.amountPaid ?? 0);
+    if (paid <= MONEY_EPS) return false;
+    return getInvoiceBalanceDue(doc) > MONEY_EPS;
+}
+
 /** Mongo filter: standalone receipt with amount received below line-item total. */
 export function buildReceiptPartialFilter() {
     return {
