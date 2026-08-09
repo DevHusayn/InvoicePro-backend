@@ -14,7 +14,6 @@ import {
     PREMIUM_AMOUNT_NGN,
     PREMIUM_AMOUNT_KOBO,
     PREMIUM_YEARLY_AMOUNT_NGN,
-    PREMIUM_LIST_PRICE_YEARLY_NGN,
     PREMIUM_YEARLY_SAVINGS_NGN,
     getBillingConfig,
     normalizeBillingInterval,
@@ -256,19 +255,6 @@ router.get('/plan', auth, paymentVerificationLimiter, async (req, res) => {
         const info = await BusinessInfo.findOne({ userId: req.user.userId });
         const secretKey = process.env.PAYSTACK_SECRET_KEY || '';
 
-        if (secretKey) {
-            try {
-                if (!process.env.PAYSTACK_PLAN_CODE) {
-                    await getOrCreatePremiumPlanCode('monthly');
-                }
-                if (!process.env.PAYSTACK_PLAN_CODE_YEARLY) {
-                    await getOrCreatePremiumPlanCode('yearly');
-                }
-            } catch {
-                /* plan creation optional for display */
-            }
-        }
-
         res.json({
             name: 'Waraqah Premium',
             amount: PREMIUM_AMOUNT_NGN,
@@ -279,12 +265,10 @@ router.get('/plan', auth, paymentVerificationLimiter, async (req, res) => {
                 monthly: {
                     amount: PREMIUM_AMOUNT_NGN,
                     interval: 'monthly',
-                    listAmount: 5000,
                 },
                 yearly: {
                     amount: PREMIUM_YEARLY_AMOUNT_NGN,
                     interval: 'yearly',
-                    listAmount: PREMIUM_LIST_PRICE_YEARLY_NGN,
                     savings: PREMIUM_YEARLY_SAVINGS_NGN,
                 },
             },

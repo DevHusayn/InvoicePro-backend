@@ -1,11 +1,10 @@
 const PAYSTACK_BASE = 'https://api.paystack.co';
 
-export const PREMIUM_AMOUNT_NGN = 2000;
+export const PREMIUM_AMOUNT_NGN = 5000;
 export const PREMIUM_AMOUNT_KOBO = PREMIUM_AMOUNT_NGN * 100;
-export const PREMIUM_YEARLY_AMOUNT_NGN = 20000;
+export const PREMIUM_YEARLY_AMOUNT_NGN = 50000;
 export const PREMIUM_YEARLY_AMOUNT_KOBO = PREMIUM_YEARLY_AMOUNT_NGN * 100;
-export const PREMIUM_LIST_PRICE_YEARLY_NGN = 24000;
-export const PREMIUM_YEARLY_SAVINGS_NGN = 4000;
+export const PREMIUM_YEARLY_SAVINGS_NGN = PREMIUM_AMOUNT_NGN * 12 - PREMIUM_YEARLY_AMOUNT_NGN;
 
 export const BILLING_INTERVALS = {
     monthly: { amountNgn: PREMIUM_AMOUNT_NGN, amountKobo: PREMIUM_AMOUNT_KOBO, months: 1 },
@@ -96,6 +95,19 @@ export async function disableSubscription(subscriptionCode, emailToken) {
             code: subscriptionCode,
             token: emailToken,
         }),
+    });
+}
+
+/** List Paystack plans (supports status, interval, amount filters). */
+export async function listPlans({ status = 'active', interval, amount, page = 1, perPage = 100 } = {}) {
+    const params = new URLSearchParams();
+    if (status) params.set('status', status);
+    if (interval) params.set('interval', interval);
+    if (amount != null) params.set('amount', String(amount));
+    params.set('page', String(page));
+    params.set('perPage', String(perPage));
+    return paystackRequest(`/plan?${params.toString()}`, {
+        method: 'GET',
     });
 }
 

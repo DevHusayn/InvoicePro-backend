@@ -50,26 +50,72 @@ app.use(mongoSanitize());
 
 const PORT = process.env.PORT || 5000;
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/waraqah';
+const MONGO_CONNECT_TIMEOUT_MS = 8000;
 
 let dbReady = false;
+let connectPromise = null;
+
+function waitWithTimeout(promise, timeoutMs, label) {
+    return Promise.race([
+        promise,
+        new Promise((_, reject) => {
+            setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
+        }),
+    ]);
+}
+
+async function resetMongoConnection() {
+    dbReady = false;
+    connectPromise = null;
+    if (mongoose.connection.readyState === 0) return;
+    try {
+        await mongoose.disconnect();
+    } catch {
+        /* best effort */
+    }
+}
 
 async function connectDB() {
     if (mongoose.connection.readyState === 1) {
         dbReady = true;
         return;
     }
-    if (mongoose.connection.readyState === 2) {
-        await mongoose.connection.asPromise();
-        dbReady = true;
+
+    if (connectPromise) {
+        await connectPromise;
         return;
     }
-    await mongoose.connect(MONGO_URI, {
-        serverSelectionTimeoutMS: 8000,
-        socketTimeoutMS: 45000,
-        maxPoolSize: process.env.VERCEL === '1' ? 10 : 50,
-    });
-    dbReady = true;
-    console.log('MongoDB connected');
+
+    connectPromise = (async () => {
+        if (mongoose.connection.readyState === 2) {
+            try {
+                await waitWithTimeout(
+                    mongoose.connection.asPromise(),
+                    MONGO_CONNECT_TIMEOUT_MS,
+                    'MongoDB connection'
+                );
+            } catch {
+                await resetMongoConnection();
+            }
+        }
+
+        if (mongoose.connection.readyState !== 1) {
+            await mongoose.connect(MONGO_URI, {
+                serverSelectionTimeoutMS: MONGO_CONNECT_TIMEOUT_MS,
+                socketTimeoutMS: 45000,
+                maxPoolSize: process.env.VERCEL === '1' ? 10 : 50,
+            });
+            console.log('MongoDB connected');
+        }
+
+        dbReady = true;
+    })();
+
+    try {
+        await connectPromise;
+    } finally {
+        connectPromise = null;
+    }
 }
 
 app.get('/api/health', (req, res) => {
