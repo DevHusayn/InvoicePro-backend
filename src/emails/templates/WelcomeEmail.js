@@ -1,7 +1,7 @@
 import React from 'react';
 import { Button, Section, Text } from '@react-email/components';
 import EmailLayout, { emailStyles } from '../layouts/EmailLayout.js';
-import { BRAND } from '../config.js';
+import { BRAND, getSupportEmail } from '../config.js';
 
 /**
  * @param {object} props
@@ -10,6 +10,7 @@ import { BRAND } from '../config.js';
  */
 export default function WelcomeEmail({ userName, dashboardUrl }) {
     const greetingName = userName?.trim() || 'there';
+    const supportEmail = getSupportEmail();
 
     return React.createElement(
         EmailLayout,
@@ -35,7 +36,7 @@ export default function WelcomeEmail({ userName, dashboardUrl }) {
         React.createElement(
             Text,
             { style: emailStyles.muted },
-            'If you have questions, reply to this email or contact our support team anytime.',
+            `If you have questions, contact us at ${supportEmail}.`,
         ),
     );
 }
