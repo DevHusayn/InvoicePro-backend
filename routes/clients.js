@@ -13,8 +13,13 @@ import {
 import { countListSummary, buildSummaryResponse, resolveListSummaryOptions, isSummaryOnlyRequest, shouldFetchListSummary } from '../utils/listSummary.js';
 import { parseListMonthQuery } from '../utils/listMonthFilter.js';
 import { getBusinessTimezone, getUtcRangeForMonthInTimezone } from '../utils/timezone.js';
+import { sendClientListExport } from '../utils/clientListExport.js';
 
 const router = express.Router();
+
+router.get('/export', auth, asyncHandler(async (req, res) => {
+    await sendClientListExport(req, res);
+}));
 
 router.get('/', auth, asyncHandler(async (req, res) => {
     const userId = req.user.userId;

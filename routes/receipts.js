@@ -41,6 +41,7 @@ import {
     escapeRegex,
 } from '../utils/pagination.js';
 import { countListSummary, buildSummaryResponse, resolveListSummaryOptions, isSummaryOnlyRequest, shouldFetchListSummary } from '../utils/listSummary.js';
+import { sendReceiptListExport } from '../utils/receiptListExport.js';
 
 const router = express.Router();
 
@@ -138,6 +139,10 @@ router.get('/next-number', auth, async (req, res) => {
         res.status(500).json({ message: err.message || 'Could not preview receipt number' });
     }
 });
+
+router.get('/export', auth, asyncHandler(async (req, res) => {
+    await sendReceiptListExport(req, res);
+}));
 
 router.get('/', auth, asyncHandler(async (req, res) => {
     const userId = req.user.userId;

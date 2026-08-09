@@ -62,6 +62,7 @@ import { INVOICE_ONLY_FILTER } from '../utils/invoiceDocumentFilter.js';
 import { countListSummary, buildSummaryResponse, resolveListSummaryOptions, isSummaryOnlyRequest, shouldFetchListSummary } from '../utils/listSummary.js';
 import { getInvoiceStatusCounts } from '../utils/dashboardAnalytics.js';
 import { parseListMonthQuery, buildIssueDateMonthFilter } from '../utils/listMonthFilter.js';
+import { sendInvoiceListExport } from '../utils/invoiceListExport.js';
 
 const router = express.Router();
 
@@ -150,6 +151,10 @@ router.get('/meta', auth, asyncHandler(async (req, res) => {
 }));
 
 // Paginated invoice list (non-drafts) — line items loaded on detail/edit
+router.get('/export', auth, asyncHandler(async (req, res) => {
+    await sendInvoiceListExport(req, res);
+}));
+
 router.get('/', auth, asyncHandler(async (req, res) => {
     const userId = req.user.userId;
 

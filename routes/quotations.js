@@ -40,6 +40,7 @@ import {
 } from '../utils/pagination.js';
 import { countListSummary, buildSummaryResponse, resolveListSummaryOptions, isSummaryOnlyRequest, shouldFetchListSummary } from '../utils/listSummary.js';
 import { parseListMonthQuery, buildIssueDateMonthFilter } from '../utils/listMonthFilter.js';
+import { sendQuotationListExport } from '../utils/quotationListExport.js';
 
 const router = express.Router();
 
@@ -139,6 +140,10 @@ router.get('/next-number', auth, async (req, res) => {
         res.status(500).json({ message: err.message || 'Could not generate quotation number' });
     }
 });
+
+router.get('/export', auth, asyncHandler(async (req, res) => {
+    await sendQuotationListExport(req, res);
+}));
 
 router.get('/', auth, asyncHandler(async (req, res) => {
     await syncExpiredQuotationsForUser(req.user.userId);

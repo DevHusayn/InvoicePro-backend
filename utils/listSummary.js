@@ -4,6 +4,7 @@ import {
     getYearMonthInTimezone,
     parseSummaryPeriodQuery,
 } from './timezone.js';
+import { shiftSummaryPeriod, computeCountPercentChange } from './dashboardAnalytics.js';
 
 export async function resolveListSummaryOptions(req, userId) {
     const timeZone = await getBusinessTimezone(userId);
@@ -40,23 +41,38 @@ export async function countListSummary(Model, baseFilter, { year, month, timeZon
             ? { year, month }
             : getYearMonthInTimezone(tz);
     const { start, end } = getUtcRangeForMonthInTimezone(resolved.year, resolved.month, tz);
+    const previousPeriod = shiftSummaryPeriod(resolved.year, resolved.month, -1);
+    const { start: previousStart, end: previousEnd } = getUtcRangeForMonthInTimezone(
+        previousPeriod.year,
+        previousPeriod.month,
+        tz
+    );
 
-    const [total, newInPeriod] = await Promise.all([
+    const [total, newInPeriod, previousNewInPeriod] = await Promise.all([
         Model.countDocuments(baseFilter),
         Model.countDocuments({
             ...baseFilter,
             createdAt: { $gte: start, $lt: end },
+        }),
+        Model.countDocuments({
+            ...baseFilter,
+            createdAt: { $gte: previousStart, $lt: previousEnd },
         }),
     ]);
 
     return {
         total,
         newInPeriod,
+        previousNewInPeriod,
+        comparison: {
+            newInPeriod: computeCountPercentChange(newInPeriod, previousNewInPeriod),
+        },
         period: {
             year: resolved.year,
             month: resolved.month,
             timezone: tz,
         },
+        previousPeriod,
     };
 }
 
@@ -65,6 +81,9 @@ export function buildSummaryResponse(totalKey, total, summaryCounts) {
         [totalKey]: total,
         newInPeriod: summaryCounts.newInPeriod,
         newThisMonth: summaryCounts.newInPeriod,
+        previousNewInPeriod: summaryCounts.previousNewInPeriod,
+        comparison: summaryCounts.comparison,
         period: summaryCounts.period,
+        previousPeriod: summaryCounts.previousPeriod,
     };
 }
