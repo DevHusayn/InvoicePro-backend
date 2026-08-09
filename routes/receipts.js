@@ -42,6 +42,11 @@ import {
 } from '../utils/pagination.js';
 import { countListSummary, buildSummaryResponse, resolveListSummaryOptions, isSummaryOnlyRequest, shouldFetchListSummary } from '../utils/listSummary.js';
 import { sendReceiptListExport } from '../utils/receiptListExport.js';
+import {
+    applyInventoryTransition,
+    checkStockWarnings,
+    withStockWarnings,
+} from '../utils/inventory.js';
 
 const router = express.Router();
 
@@ -233,10 +238,19 @@ router.post('/', auth, requireEmailVerified, async (req, res) => {
             ...payload,
             userId: req.user.userId,
         });
+        const stockWarnings = await checkStockWarnings(req.user.userId, {
+            prevDoc: null,
+            nextDoc: receipt,
+        });
+        await applyInventoryTransition({
+            userId: req.user.userId,
+            prevDoc: null,
+            nextDoc: receipt,
+        });
         if (payload.status === PAID) {
             await tryAutoEmailReceipt({ receipt, userId: req.user.userId });
         }
-        res.status(201).json(receipt);
+        res.status(201).json(withStockWarnings(receipt, stockWarnings));
     } catch (err) {
         if (err.status === 400) {
             return res.status(400).json({ message: err.message });
@@ -331,7 +345,17 @@ router.put('/:id', auth, requireEmailVerified, validateObjectId(), async (req, r
             await tryAutoEmailReceipt({ receipt, userId: req.user.userId });
         }
 
-        res.json(receipt);
+        const stockWarnings = await checkStockWarnings(req.user.userId, {
+            prevDoc: existing,
+            nextDoc: receipt,
+        });
+        await applyInventoryTransition({
+            userId: req.user.userId,
+            prevDoc: existing,
+            nextDoc: receipt,
+        });
+
+        res.json(withStockWarnings(receipt, stockWarnings));
     } catch (err) {
         if (reserved) {
             await releaseInvoiceCreation(req.user.userId);

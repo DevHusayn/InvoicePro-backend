@@ -63,6 +63,11 @@ import { countListSummary, buildSummaryResponse, resolveListSummaryOptions, isSu
 import { getInvoiceStatusCounts } from '../utils/dashboardAnalytics.js';
 import { parseListMonthQuery, buildIssueDateMonthFilter } from '../utils/listMonthFilter.js';
 import { sendInvoiceListExport } from '../utils/invoiceListExport.js';
+import {
+    applyInventoryTransition,
+    checkStockWarnings,
+    withStockWarnings,
+} from '../utils/inventory.js';
 
 const router = express.Router();
 
@@ -305,10 +310,19 @@ router.post('/', auth, requireEmailVerified, async (req, res) => {
             ...payload,
             userId: req.user.userId,
         });
+        const stockWarnings = await checkStockWarnings(req.user.userId, {
+            prevDoc: null,
+            nextDoc: invoice,
+        });
+        await applyInventoryTransition({
+            userId: req.user.userId,
+            prevDoc: null,
+            nextDoc: invoice,
+        });
         if (!isDraft) {
             await tryAutoEmailInvoice({ invoice, userId: req.user.userId });
         }
-        res.status(201).json(invoice);
+        res.status(201).json(withStockWarnings(invoice, stockWarnings));
     } catch (err) {
         if (err.status === 400) {
             return res.status(400).json({ message: err.message });
@@ -463,7 +477,17 @@ router.put('/:id', auth, requireEmailVerified, validateObjectId(), async (req, r
             await tryAutoEmailInvoice({ invoice, userId: req.user.userId });
         }
 
-        res.json(invoice);
+        const stockWarnings = await checkStockWarnings(req.user.userId, {
+            prevDoc: existing,
+            nextDoc: invoice,
+        });
+        await applyInventoryTransition({
+            userId: req.user.userId,
+            prevDoc: existing,
+            nextDoc: invoice,
+        });
+
+        res.json(withStockWarnings(invoice, stockWarnings));
     } catch (err) {
         if (reserved) {
             await releaseInvoiceCreation(req.user.userId);
@@ -639,6 +663,12 @@ router.delete('/:id', auth, requireEmailVerified, validateObjectId(), asyncHandl
     }
 
     assertInvoiceDeleteAllowed(invoice);
+
+    await applyInventoryTransition({
+        userId: req.user.userId,
+        prevDoc: invoice,
+        nextDoc: null,
+    });
 
     await Invoice.deleteOne({ _id: invoice._id });
     res.json({ message: 'Invoice deleted' });

@@ -9,8 +9,55 @@ import {
     buildPaginationMeta,
     buildSearchFilter,
 } from '../utils/pagination.js';
+import { adjustProductStock } from '../utils/inventory.js';
 
 const router = express.Router();
+
+function validationError(message) {
+    const err = new Error(message);
+    err.status = 400;
+    return err;
+}
+
+function sanitizeInventoryFields(body, { existing = null } = {}) {
+    const fields = {};
+
+    if (body.trackInventory !== undefined) {
+        fields.trackInventory = Boolean(body.trackInventory);
+    } else if (existing) {
+        fields.trackInventory = Boolean(existing.trackInventory);
+    } else {
+        fields.trackInventory = false;
+    }
+
+    if (body.quantityOnHand !== undefined) {
+        const quantityOnHand = Number(body.quantityOnHand);
+        if (!Number.isFinite(quantityOnHand) || quantityOnHand < 0) {
+            throw validationError('Quantity on hand must be zero or greater.');
+        }
+        fields.quantityOnHand = quantityOnHand;
+    } else if (!existing) {
+        fields.quantityOnHand = 0;
+    }
+
+    if (body.lowStockThreshold !== undefined) {
+        if (body.lowStockThreshold === null || body.lowStockThreshold === '') {
+            fields.lowStockThreshold = null;
+        } else {
+            const threshold = Number(body.lowStockThreshold);
+            if (!Number.isFinite(threshold) || threshold < 0) {
+                throw validationError('Low stock threshold must be zero or greater.');
+            }
+            fields.lowStockThreshold = threshold;
+        }
+    }
+
+    if (!fields.trackInventory) {
+        fields.lowStockThreshold = null;
+    }
+
+    return fields;
+}
 
 router.get('/', auth, asyncHandler(async (req, res) => {
     const { page, limit, skip } = parsePagination(req);
@@ -35,31 +82,56 @@ router.post('/', auth, asyncHandler(async (req, res) => {
     if (!name) {
         return res.status(400).json({ message: 'Product name is required' });
     }
+
+    const inventoryFields = sanitizeInventoryFields(req.body);
     const product = await Product.create({
         userId: req.user.userId,
         name,
         description: String(req.body.description || '').trim(),
         unitPrice: Number(req.body.unitPrice) || 0,
+        ...inventoryFields,
     });
     res.status(201).json(product);
 }));
 
 router.put('/:id', auth, validateObjectId(), asyncHandler(async (req, res) => {
+    const existing = await Product.findOne({ _id: req.params.id, userId: req.user.userId });
+    if (!existing) return res.status(404).json({ message: 'Product not found' });
+
     const name = req.body.name !== undefined ? String(req.body.name).trim() : undefined;
     if (name !== undefined && !name) {
         return res.status(400).json({ message: 'Product name is required' });
     }
+
     const updates = {};
     if (name !== undefined) updates.name = name;
     if (req.body.description !== undefined) updates.description = String(req.body.description).trim();
     if (req.body.unitPrice !== undefined) updates.unitPrice = Number(req.body.unitPrice) || 0;
+
+    Object.assign(
+        updates,
+        sanitizeInventoryFields(req.body, { existing })
+    );
 
     const product = await Product.findOneAndUpdate(
         { _id: req.params.id, userId: req.user.userId },
         updates,
         { new: true }
     );
-    if (!product) return res.status(404).json({ message: 'Product not found' });
+    res.json(product);
+}));
+
+router.post('/:id/adjust-stock', auth, validateObjectId(), asyncHandler(async (req, res) => {
+    const delta = Number(req.body.delta);
+    if (!Number.isFinite(delta) || delta === 0) {
+        return res.status(400).json({ message: 'A non-zero numeric delta is required.' });
+    }
+
+    const product = await adjustProductStock(req.user.userId, req.params.id, delta);
+    if (!product) {
+        return res.status(404).json({ message: 'Product not found or inventory is not tracked.' });
+    }
+
     res.json(product);
 }));
 

@@ -23,6 +23,10 @@ import {
 } from '../utils/quotationValidation.js';
 import { attachQuotationPublicTokenIfNeeded } from '../utils/quotationPublicToken.js';
 import { attachPublicTokenIfNeeded } from '../utils/invoicePublicToken.js';
+import {
+    applyInventoryTransition,
+    checkStockWarnings,
+} from '../utils/inventory.js';
 import { syncExpiredQuotationsForUser } from '../utils/quotationExpire.js';
 import {
     dispatchQuotationEmailToClient,
@@ -425,6 +429,7 @@ router.post('/:id/convert', auth, requireEmailVerified, validateObjectId(), asyn
                 quantity: item.quantity,
                 rate: item.rate,
                 unit: item.unit || 'Qty',
+                productId: item.productId || null,
             })),
             notes: quotation.notes || '',
             clientAdditionalInfo: quotation.clientAdditionalInfo || '',
@@ -445,6 +450,16 @@ router.post('/:id/convert', auth, requireEmailVerified, validateObjectId(), asyn
         invoice.publicToken = tokenPayload.publicToken;
         await invoice.save();
 
+        const stockWarnings = await checkStockWarnings(req.user.userId, {
+            prevDoc: null,
+            nextDoc: invoice,
+        });
+        await applyInventoryTransition({
+            userId: req.user.userId,
+            prevDoc: null,
+            nextDoc: invoice,
+        });
+
         quotation.status = 'converted';
         quotation.convertedInvoiceId = invoice._id;
         quotation.convertedAt = new Date();
@@ -452,7 +467,7 @@ router.post('/:id/convert', auth, requireEmailVerified, validateObjectId(), asyn
 
         res.status(201).json({
             quotation,
-            invoice,
+            invoice: stockWarnings.length ? { ...invoice.toObject(), stockWarnings } : invoice,
         });
     } catch (err) {
         if (err.status === 400) {

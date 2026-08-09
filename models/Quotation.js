@@ -19,6 +19,11 @@ const quotationSchema = new mongoose.Schema(
                 quantity: Number,
                 rate: Number,
                 unit: { type: String, default: 'Qty' },
+                productId: {
+                    type: mongoose.Schema.Types.ObjectId,
+                    ref: 'Product',
+                    default: null,
+                },
             },
         ],
         notes: String,

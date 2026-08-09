@@ -51,6 +51,16 @@ function validationError(message, status = 400) {
     return err;
 }
 
+function sanitizeItemProductId(productId) {
+    if (productId === undefined || productId === null || productId === '') {
+        return null;
+    }
+    if (!isValidObjectId(String(productId))) {
+        throw validationError('Invalid product ID on line item.');
+    }
+    return String(productId);
+}
+
 function sanitizeQuotationItem(item) {
     if (!item || typeof item !== 'object') {
         throw validationError('Invalid quotation line item.');
@@ -61,6 +71,7 @@ function sanitizeQuotationItem(item) {
         quantity: sanitizeNumber(item.quantity, { min: 0, max: 1_000_000, fallback: 0 }),
         rate: sanitizeNumber(item.rate, { min: 0, max: 1_000_000_000, fallback: 0 }),
         unit,
+        productId: sanitizeItemProductId(item.productId),
     };
 }
 
