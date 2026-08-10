@@ -37,6 +37,16 @@ export function getEmailFromAddress() {
     return process.env.EMAIL_FROM?.trim() || 'Waraqah <no_reply@mail.mywaraqah.com>';
 }
 
+/** Owner alerts and platform notifications (invoice paid, low stock, etc.). */
+export function getNotificationFromAddress() {
+    return process.env.EMAIL_NOTIFICATIONS_FROM?.trim() || 'Waraqah <notifications@mail.mywaraqah.com>';
+}
+
+/** Founder welcome email — personal onboarding note for new signups. */
+export function getWelcomeEmailFromAddress() {
+    return process.env.EMAIL_WELCOME_FROM?.trim() || 'Waraqah <founder@mail.mywaraqah.com>';
+}
+
 export function getSupportEmail() {
     return process.env.EMAIL_SUPPORT?.trim() || 'support@mywaraqah.com';
 }

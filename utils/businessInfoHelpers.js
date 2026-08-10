@@ -51,6 +51,8 @@ const ALLOWED_UPDATE_FIELDS = [
     'invoiceTemplateId',
     'autoEmailInvoices',
     'autoPaymentReminders',
+    'lowStockEmailAlerts',
+    'autoEmailMonthlyStatements',
 ];
 
 const PREMIUM_PNG_ASSET_FIELDS = [
@@ -176,6 +178,14 @@ export function pickAllowedBusinessUpdates(body, { allowPlan = false, premium = 
         updates.autoPaymentReminders = Boolean(updates.autoPaymentReminders);
     }
 
+    if (updates.lowStockEmailAlerts !== undefined) {
+        updates.lowStockEmailAlerts = Boolean(updates.lowStockEmailAlerts);
+    }
+
+    if (updates.autoEmailMonthlyStatements !== undefined) {
+        updates.autoEmailMonthlyStatements = Boolean(updates.autoEmailMonthlyStatements);
+    }
+
     if (updates.timezone !== undefined) {
         updates.timezone = normalizeTimezone(updates.timezone);
     }
@@ -260,6 +270,8 @@ export function toBusinessInfoResponse(doc, { includeAssets = true } = {}) {
         invoiceTemplateId,
         autoEmailInvoices: Boolean(o.autoEmailInvoices),
         autoPaymentReminders: o.autoPaymentReminders !== false,
+        lowStockEmailAlerts: Boolean(o.lowStockEmailAlerts),
+        autoEmailMonthlyStatements: o.autoEmailMonthlyStatements !== false,
     };
 }
 
@@ -317,4 +329,6 @@ export const defaultBusinessInfoFields = {
     invoiceTemplateId: DEFAULT_TEMPLATE_ID,
     autoEmailInvoices: false,
     autoPaymentReminders: true,
+    lowStockEmailAlerts: false,
+    autoEmailMonthlyStatements: true,
 };

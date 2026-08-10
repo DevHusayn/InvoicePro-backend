@@ -165,6 +165,8 @@ if (process.env.VERCEL !== '1') {
     connectDB()
         .then(() => import('./recurringAutomation.js'))
         .then(() => import('./paymentReminderCron.js'))
+        .then(() => import('./lowStockAlertCron.js'))
+        .then(() => import('./monthlyStatementCron.js'))
         .catch((err) => console.error('Startup error:', err));
 
     app.listen(PORT, () => {

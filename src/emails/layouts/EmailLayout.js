@@ -12,6 +12,7 @@ import {
     Text,
 } from '@react-email/components';
 import { BRAND, getCopyrightYear, getLogoIconUrl, getSupportEmail, getWebsiteUrl } from '../config.js';
+import { EMAIL_LAYOUT_CLASSES, ResponsiveEmailStyles } from './responsiveEmailStyles.js';
 
 const BODONI_MODA_STYLESHEET =
     'https://fonts.googleapis.com/css2?family=Bodoni+Moda:opsz,wght@6..96,600&display=swap';
@@ -39,17 +40,18 @@ export default function EmailLayout({ preview, children }) {
                 rel: 'stylesheet',
                 href: BODONI_MODA_STYLESHEET,
             }),
+            React.createElement(ResponsiveEmailStyles),
         ),
         preview ? React.createElement(Preview, null, preview) : null,
         React.createElement(
             Body,
-            { style: styles.body },
+            { style: styles.body, className: EMAIL_LAYOUT_CLASSES.body },
             React.createElement(
                 Container,
-                { style: styles.container },
+                { style: styles.container, className: EMAIL_LAYOUT_CLASSES.container },
                 React.createElement(
                     Section,
-                    { style: styles.header },
+                    { style: styles.header, className: EMAIL_LAYOUT_CLASSES.header },
                     React.createElement(
                         Link,
                         { href: websiteUrl, style: styles.logoLink },
@@ -88,11 +90,15 @@ export default function EmailLayout({ preview, children }) {
                         ),
                     ),
                 ),
-                React.createElement(Section, { style: styles.content }, children),
+                React.createElement(
+                    Section,
+                    { style: styles.content, className: EMAIL_LAYOUT_CLASSES.content },
+                    children,
+                ),
                 React.createElement(Hr, { style: styles.divider }),
                 React.createElement(
                     Section,
-                    { style: styles.footer },
+                    { style: styles.footer, className: EMAIL_LAYOUT_CLASSES.footer },
                     React.createElement(
                         Text,
                         { style: styles.footerText },

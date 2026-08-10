@@ -13,6 +13,7 @@ import {
 } from '@react-email/components';
 import { BRAND, getWebsiteUrl } from '../config.js';
 import { buildClientEmailBranding } from '../helpers/clientEmailBranding.js';
+import { EMAIL_LAYOUT_CLASSES, ResponsiveEmailStyles } from './responsiveEmailStyles.js';
 
 const WARAQAH_SIGNUP_URL = 'https://mywaraqah.com';
 
@@ -35,17 +36,17 @@ export default function ClientEmailLayout({ preview, branding, children }) {
     return React.createElement(
         Html,
         null,
-        React.createElement(Head, null),
+        React.createElement(Head, null, React.createElement(ResponsiveEmailStyles)),
         preview ? React.createElement(Preview, null, preview) : null,
         React.createElement(
             Body,
-            { style: styles.body },
+            { style: styles.body, className: EMAIL_LAYOUT_CLASSES.body },
             React.createElement(
                 Container,
-                { style: styles.container },
+                { style: styles.container, className: EMAIL_LAYOUT_CLASSES.container },
                 React.createElement(
                     Section,
-                    { style: styles.header },
+                    { style: styles.header, className: EMAIL_LAYOUT_CLASSES.header },
                     logoUrl
                         ? React.createElement(Img, {
                             src: logoUrl,
@@ -56,11 +57,15 @@ export default function ClientEmailLayout({ preview, branding, children }) {
                         })
                         : React.createElement(Text, { style: styles.logoText }, brand.businessName),
                 ),
-                React.createElement(Section, { style: styles.content }, children),
+                React.createElement(
+                    Section,
+                    { style: styles.content, className: EMAIL_LAYOUT_CLASSES.content },
+                    children,
+                ),
                 React.createElement(Hr, { style: styles.divider }),
                 React.createElement(
                     Section,
-                    { style: styles.footer },
+                    { style: styles.footer, className: EMAIL_LAYOUT_CLASSES.footer },
                     React.createElement(
                         Text,
                         { style: styles.footerText },

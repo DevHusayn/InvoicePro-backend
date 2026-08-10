@@ -1,5 +1,5 @@
 import { render } from '@react-email/render';
-import { assertResendConfigured, getDefaultFrom, getResendClient } from './resend.js';
+import { assertResendConfigured, getDefaultFrom, getNotificationFrom, getResendClient } from './resend.js';
 import { isProductionEnvironment } from './config.js';
 import {
     EmailNotConfiguredError,
@@ -11,12 +11,38 @@ import {
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+const NOTIFICATION_EMAIL_TYPES = new Set([
+    'owner-invoice-emailed',
+    'owner-invoice-paid',
+    'owner-partial-payment',
+    'owner-invoice-reminder-sent',
+    'owner-receipt-sent',
+    'owner-invoice-cancelled',
+    'owner-quotation-emailed',
+    'owner-low-stock',
+    'admin-new-user',
+    'premium-expiry-reminder',
+    'premium-payment-failed',
+    'premium-subscription-cancelled',
+    'premium-upgrade-success',
+    'account-suspended',
+    'account-reactivated',
+]);
+
 function validateRecipient(to) {
     const email = String(to || '').trim().toLowerCase();
     if (!EMAIL_REGEX.test(email)) {
         throw new InvalidRecipientError(to);
     }
     return email;
+}
+
+function resolveFromAddress({ type, fromOverride }) {
+    if (fromOverride) return fromOverride;
+    if (NOTIFICATION_EMAIL_TYPES.has(type) || type?.startsWith('owner-')) {
+        return getNotificationFrom();
+    }
+    return getDefaultFrom();
 }
 
 /**
@@ -31,6 +57,7 @@ function validateRecipient(to) {
  * @param {string} [options.from] - Optional from address override
  * @param {string} options.type - Internal email type for logging
  * @param {object} [options.tags] - Optional Resend tags
+ * @param {Array<{ filename: string, content: Buffer|string }>} [options.attachments]
  * @returns {Promise<{ sent: boolean, id?: string, devLogged?: boolean }>}
  */
 export async function sendEmail({
@@ -42,9 +69,10 @@ export async function sendEmail({
     replyTo,
     from: fromOverride,
     tags,
+    attachments,
 }) {
     const recipient = validateRecipient(to);
-    const from = fromOverride || getDefaultFrom();
+    const from = resolveFromAddress({ type, fromOverride });
 
     if (!getResendClient()) {
         if (isProductionEnvironment()) {
@@ -55,6 +83,9 @@ export async function sendEmail({
         console.log(`\n[Waraqah Email] Dev mode — ${type} (RESEND_API_KEY not set)`);
         console.log(`  To: ${recipient}`);
         console.log(`  Subject: ${subject}`);
+        if (attachments?.length) {
+            console.log(`  Attachments: ${attachments.map((file) => file.filename).join(', ')}`);
+        }
         console.log(`  Body:\n${previewText}\n`);
         return { sent: false, devLogged: true };
     }
@@ -85,6 +116,15 @@ export async function sendEmail({
 
         if (replyTo) payload.reply_to = replyTo;
         if (tags) payload.tags = tags;
+        if (attachments?.length) {
+            payload.attachments = attachments.map((file) => ({
+                filename: file.filename,
+                content:
+                    typeof file.content === 'string'
+                        ? file.content
+                        : file.content.toString('base64'),
+            }));
+        }
 
         const { data, error } = await client.emails.send(payload);
 

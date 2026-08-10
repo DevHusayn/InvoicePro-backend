@@ -1,7 +1,7 @@
 import React from 'react';
 import { sendEmail } from '../sendEmail.js';
 import WelcomeEmail from '../templates/WelcomeEmail.js';
-import { BRAND } from '../config.js';
+import { BRAND, getSupportEmail, getWelcomeEmailFromAddress } from '../config.js';
 
 /**
  * Send welcome email to a new user.
@@ -14,7 +14,9 @@ import { BRAND } from '../config.js';
 export async function sendWelcomeEmail({ to, userName, dashboardUrl }) {
     return sendEmail({
         to,
-        subject: `Welcome to ${BRAND.name}`,
+        subject: `Welcome to ${BRAND.name}!`,
+        from: getWelcomeEmailFromAddress(),
+        replyTo: getSupportEmail(),
         type: 'welcome',
         react: React.createElement(WelcomeEmail, { userName, dashboardUrl }),
     });

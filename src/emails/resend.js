@@ -1,5 +1,5 @@
 import { Resend } from 'resend';
-import { getEmailFromAddress, isResendConfigured } from './config.js';
+import { getEmailFromAddress, getNotificationFromAddress, isResendConfigured } from './config.js';
 import { EmailNotConfiguredError } from './errors.js';
 
 let cachedClient = null;
@@ -27,4 +27,8 @@ export function assertResendConfigured() {
 
 export function getDefaultFrom() {
     return getEmailFromAddress();
+}
+
+export function getNotificationFrom() {
+    return getNotificationFromAddress();
 }

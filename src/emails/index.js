@@ -33,6 +33,8 @@ export {
     sendPremiumPaymentFailedEmail,
     sendPremiumSubscriptionCancelledEmail,
     sendPremiumExpiryReminderEmail,
+    sendLowStockAlertEmail,
+    sendMonthlyStatementEmail,
 } from './senders/index.js';
 
 export {

@@ -22,6 +22,14 @@
         {
             "path": "/api/cron/recurring-invoices",
             "schedule": "0 2 * * *"
+        },
+        {
+            "path": "/api/cron/low-stock-alerts",
+            "schedule": "0 8 * * *"
+        },
+        {
+            "path": "/api/cron/monthly-statements",
+            "schedule": "0 9 1 * *"
         }
     ]
 }

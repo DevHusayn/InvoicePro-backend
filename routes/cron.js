@@ -1,6 +1,8 @@
 import express from 'express';
 import { sendDuePaymentReminders } from '../paymentReminderAutomation.js';
 import { sendPremiumExpiryReminders } from '../premiumExpiryReminderAutomation.js';
+import { sendLowStockDigests } from '../lowStockAlertAutomation.js';
+import { sendMonthlyStatements } from '../monthlyStatementAutomation.js';
 import { generateRecurringInvoices } from '../utils/recurringInvoices.js';
 import { syncAllOverdueInvoices } from '../utils/invoiceOverdue.js';
 import { syncAllExpiredQuotations } from '../utils/quotationExpire.js';
@@ -50,6 +52,19 @@ router.get('/expire-quotations', verifyCronSecret, asyncHandler(async (req, res)
 router.get('/recurring-invoices', verifyCronSecret, asyncHandler(async (req, res) => {
     const { createdCount } = await generateRecurringInvoices();
     res.json({ ok: true, message: 'Recurring invoices processed.', createdCount });
+}));
+
+/** Vercel Cron — daily low-stock digest for opted-in users. */
+router.get('/low-stock-alerts', verifyCronSecret, asyncHandler(async (req, res) => {
+    const { processed, skipped } = await sendLowStockDigests();
+    res.json({ ok: true, message: 'Low stock alerts processed.', processed, skipped });
+}));
+
+/** Vercel Cron — monthly billing statement PDFs for Premium users (opt-out). */
+router.get('/monthly-statements', verifyCronSecret, asyncHandler(async (req, res) => {
+    const forcePeriodKey = typeof req.query.period === 'string' ? req.query.period.trim() : null;
+    const { processed, skipped } = await sendMonthlyStatements({ forcePeriodKey });
+    res.json({ ok: true, message: 'Monthly statements processed.', processed, skipped });
 }));
 
 export default router;

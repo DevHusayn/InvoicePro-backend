@@ -39,6 +39,14 @@ const businessInfoSchema = new mongoose.Schema({
     autoEmailInvoices: { type: Boolean, default: false },
     /** Email payment reminders automatically for due soon / overdue invoices. */
     autoPaymentReminders: { type: Boolean, default: true },
+    /** Email owner a daily digest when tracked products fall at or below their low-stock threshold. */
+    lowStockEmailAlerts: { type: Boolean, default: false },
+    /** Last low-stock digest sent to the owner (max one email per 24 hours). */
+    lowStockEmailLastSentAt: { type: Date, default: null },
+    /** Email the owner their monthly billing statement PDF (Premium). Default on. */
+    autoEmailMonthlyStatements: { type: Boolean, default: true },
+    /** Period key "YYYY-MM" for the last automated monthly statement email. */
+    monthlyStatementLastSentFor: { type: String, default: null },
     /** premiumUntil value this expiry reminder was sent for (avoids duplicate sends). */
     premiumExpiryReminderForUntil: { type: Date, default: null },
 }, { timestamps: true });

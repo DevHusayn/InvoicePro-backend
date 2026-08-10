@@ -26,3 +26,5 @@ export { sendPremiumUpgradeSuccessEmail } from './premiumUpgradeSuccessEmail.js'
 export { sendPremiumPaymentFailedEmail } from './premiumPaymentFailedEmail.js';
 export { sendPremiumSubscriptionCancelledEmail } from './premiumSubscriptionCancelledEmail.js';
 export { sendPremiumExpiryReminderEmail } from './premiumExpiryReminderEmail.js';
+export { sendLowStockAlertEmail } from './lowStockAlertEmail.js';
+export { sendMonthlyStatementEmail } from './monthlyStatementEmail.js';
