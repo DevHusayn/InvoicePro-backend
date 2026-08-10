@@ -9,7 +9,18 @@ import {
     buildPaginationMeta,
     buildSearchFilter,
 } from '../utils/pagination.js';
+import {
+    countListSummary,
+    buildSummaryResponse,
+    resolveListSummaryOptions,
+    isSummaryOnlyRequest,
+    shouldFetchListSummary,
+} from '../utils/listSummary.js';
+import { parseListMonthQuery } from '../utils/listMonthFilter.js';
+import { getBusinessTimezone, getUtcRangeForMonthInTimezone } from '../utils/timezone.js';
+import { sendProductListExport } from '../utils/productListExport.js';
 import { adjustProductStock } from '../utils/inventory.js';
+import { getProductActivity } from '../utils/productActivity.js';
 
 const router = express.Router();
 
@@ -59,21 +70,58 @@ function sanitizeInventoryFields(body, { existing = null } = {}) {
     return fields;
 }
 
+router.get('/export', auth, asyncHandler(async (req, res) => {
+    await sendProductListExport(req, res);
+}));
+
 router.get('/', auth, asyncHandler(async (req, res) => {
+    const userId = req.user.userId;
+
+    if (isSummaryOnlyRequest(req.query)) {
+        const summaryOpts = await resolveListSummaryOptions(req, userId);
+        const summaryCounts = await countListSummary(Product, { userId }, summaryOpts);
+        return res.json({
+            summary: buildSummaryResponse('totalProducts', summaryCounts.total, summaryCounts),
+        });
+    }
+
     const { page, limit, skip } = parsePagination(req);
-    const filter = { userId: req.user.userId };
+    const filter = { userId };
     const searchFilter = buildSearchFilter(req.query.search, ['name', 'description']);
     if (searchFilter) Object.assign(filter, searchFilter);
 
-    const { data, total } = await paginateFind(Product, filter, {
-        skip,
-        limit,
-        sort: { name: 1 },
-        lean: true,
-    });
+    const listMonth = parseListMonthQuery(req.query);
+    if (listMonth) {
+        const timeZone = await getBusinessTimezone(userId);
+        const { start, end } = getUtcRangeForMonthInTimezone(
+            listMonth.year,
+            listMonth.month,
+            timeZone
+        );
+        filter.createdAt = { $gte: start, $lt: end };
+    }
+
+    const includeSummary = shouldFetchListSummary(req.query);
+    const summaryOpts = includeSummary ? await resolveListSummaryOptions(req, userId) : null;
+
+    const [{ data, total }, summaryCounts] = await Promise.all([
+        paginateFind(Product, filter, {
+            skip,
+            limit,
+            sort: { name: 1 },
+            lean: true,
+        }),
+        includeSummary
+            ? countListSummary(Product, { userId }, summaryOpts)
+            : Promise.resolve(null),
+    ]);
+
     res.json({
         data,
         pagination: buildPaginationMeta(page, limit, total),
+        ...(summaryCounts
+            ? { summary: buildSummaryResponse('totalProducts', summaryCounts.total, summaryCounts) }
+            : {}),
     });
 }));
 
@@ -92,6 +140,18 @@ router.post('/', auth, asyncHandler(async (req, res) => {
         ...inventoryFields,
     });
     res.status(201).json(product);
+}));
+
+router.get('/:id/activity', auth, validateObjectId(), asyncHandler(async (req, res) => {
+    const activity = await getProductActivity(req.user.userId, req.params.id);
+    if (!activity) return res.status(404).json({ message: 'Product not found' });
+    res.json(activity);
+}));
+
+router.get('/:id', auth, validateObjectId(), asyncHandler(async (req, res) => {
+    const product = await Product.findOne({ _id: req.params.id, userId: req.user.userId }).lean();
+    if (!product) return res.status(404).json({ message: 'Product not found' });
+    res.json(product);
 }));
 
 router.put('/:id', auth, validateObjectId(), asyncHandler(async (req, res) => {
