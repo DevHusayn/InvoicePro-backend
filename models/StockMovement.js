@@ -9,12 +9,12 @@ const stockMovementSchema = new mongoose.Schema({
     balanceAfter: { type: Number, required: true },
     source: {
         type: String,
-        enum: ['manual', 'opening', 'set', 'invoice', 'receipt'],
+        enum: ['manual', 'opening', 'set', 'invoice', 'receipt', 'purchase_order'],
         required: true,
     },
     action: {
         type: String,
-        enum: ['adjustment', 'opening', 'set', 'issue', 'update', 'cancel', 'delete'],
+        enum: ['adjustment', 'opening', 'set', 'issue', 'update', 'cancel', 'delete', 'receive'],
         required: true,
     },
     documentId: { type: mongoose.Schema.Types.ObjectId, default: null },

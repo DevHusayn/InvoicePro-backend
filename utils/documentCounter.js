@@ -13,7 +13,7 @@ export async function incrementDocumentSequence(userId, field, computeSeedMax) {
     if (doc) return doc[field];
 
     const seedMax = await computeSeedMax(userId);
-    const seed = { userId, invoiceSeq: 0, quotationSeq: 0, [field]: seedMax };
+    const seed = { userId, invoiceSeq: 0, quotationSeq: 0, purchaseOrderSeq: 0, [field]: seedMax };
     try {
         await DocumentCounter.create(seed);
     } catch (err) {

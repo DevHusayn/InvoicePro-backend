@@ -14,6 +14,8 @@ import draftRoutes from './routes/drafts.js';
 import clientRoutes from './routes/clients.js';
 import businessInfoRoutes from './routes/companyInfo.js';
 import productRoutes from './routes/products.js';
+import supplierRoutes from './routes/suppliers.js';
+import purchaseOrderRoutes from './routes/purchaseOrders.js';
 import dashboardRoutes from './routes/dashboard.js';
 import paymentRoutes, { paystackWebhookHandler } from './routes/payments.js';
 import publicRoutes from './routes/publicInvoices.js';
@@ -153,6 +155,8 @@ app.use('/api/drafts', draftRoutes);
 app.use('/api/clients', clientRoutes);
 app.use('/api/business-info', businessInfoRoutes);
 app.use('/api/products', productRoutes);
+app.use('/api/suppliers', supplierRoutes);
+app.use('/api/purchase-orders', purchaseOrderRoutes);
 
 app.get('/', (req, res) => {
     res.send('Waraqah API running');

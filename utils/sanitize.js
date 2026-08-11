@@ -138,3 +138,58 @@ export function sanitizeClientUpdates(body) {
     }
     return updates;
 }
+
+export function sanitizeSupplierPayload(body) {
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+        const err = new Error('Invalid supplier payload.');
+        err.status = 400;
+        throw err;
+    }
+
+    const name = sanitizePlainText(body.name, 200);
+    if (!name) {
+        const err = new Error('Supplier name is required.');
+        err.status = 400;
+        throw err;
+    }
+
+    return {
+        name,
+        company: sanitizePlainText(body.company ?? body.business, 200),
+        email: body.email ? sanitizeOptionalEmail(body.email) : '',
+        phone: sanitizePlainText(body.phone, 50),
+        address: sanitizePlainText(body.address, 500),
+    };
+}
+
+export function sanitizeSupplierUpdates(body) {
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+        const err = new Error('Invalid supplier payload.');
+        err.status = 400;
+        throw err;
+    }
+
+    const updates = {};
+    if (body.name !== undefined) {
+        const name = sanitizePlainText(body.name, 200);
+        if (!name) {
+            const err = new Error('Supplier name is required.');
+            err.status = 400;
+            throw err;
+        }
+        updates.name = name;
+    }
+    if (body.company !== undefined || body.business !== undefined) {
+        updates.company = sanitizePlainText(body.company ?? body.business, 200);
+    }
+    if (body.email !== undefined) {
+        updates.email = body.email ? sanitizeOptionalEmail(body.email) : '';
+    }
+    if (body.phone !== undefined) {
+        updates.phone = sanitizePlainText(body.phone, 50);
+    }
+    if (body.address !== undefined) {
+        updates.address = sanitizePlainText(body.address, 500);
+    }
+    return updates;
+}
