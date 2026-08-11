@@ -126,6 +126,6 @@ test('getClientActivity aggregates documents and product rollups', async (t) => 
     assert.equal(activity.documents.length, 3);
     assert.equal(activity.byProduct.length, 1);
     assert.equal(activity.byProduct[0].displayName, 'Fish');
-    assert.equal(activity.byProduct[0].quantitySold, 8);
-    assert.equal(activity.byProduct[0].lineTotal, 8000);
+    assert.equal(activity.byProduct[0].quantitySold, 5);
+    assert.equal(activity.byProduct[0].lineTotal, 5000);
 });

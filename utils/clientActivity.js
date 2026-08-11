@@ -4,12 +4,8 @@ import Client from '../models/Client.js';
 import Product from '../models/Product.js';
 import { INVOICE_ONLY_FILTER, RECEIPT_ONLY_FILTER } from './invoiceDocumentFilter.js';
 import { computePaidRevenue, computePendingBalance } from './dashboardStats.js';
-
-function roundMoney(value) {
-    const n = Number(value);
-    if (!Number.isFinite(n)) return 0;
-    return Math.round(n * 100) / 100;
-}
+import { computePaidRatio, docCountsAsRealizedSale } from './realizedSales.js';
+import { computeDocumentDiscountRatio, roundMoney } from './documentLineMath.js';
 
 function resolveDocumentNumber(doc, documentType) {
     if (documentType === 'quotation') return doc.quotationNumber || '—';
@@ -41,13 +37,16 @@ function productRollupKey(item) {
     return description ? `manual:${description}` : null;
 }
 
-function upsertProductRollup(map, item, docDate) {
+function upsertProductRollup(map, item, docDate, paidRatio = 1, discountRatio = 0) {
     const key = productRollupKey(item);
     if (!key) return;
 
-    const quantity = Number(item.quantity) || 0;
+    const ratio = Number(paidRatio) || 0;
+    if (ratio <= 0) return;
+
+    const quantity = (Number(item.quantity) || 0) * ratio;
     const rate = Number(item.rate) || 0;
-    const lineTotal = quantity * rate;
+    const lineTotal = roundMoney(quantity * rate * (1 - discountRatio));
 
     const existing = map.get(key) || {
         key,
@@ -69,11 +68,17 @@ function upsertProductRollup(map, item, docDate) {
 }
 
 function addDocumentItemsToRollup(map, doc) {
+    if (!docCountsAsRealizedSale(doc)) return;
+    const paidRatio = computePaidRatio(doc);
+    const discountRatio = computeDocumentDiscountRatio(doc, doc.items);
     if (!Array.isArray(doc.items)) return;
     for (const item of doc.items) {
-        upsertProductRollup(map, item, doc.date || null);
+        upsertProductRollup(map, item, doc.date || null, paidRatio, discountRatio);
     }
 }
+
+const DOC_SELECT_FIELDS =
+    'invoiceNumber receiptNumber date status total amountPaid currency items documentType discount discountType discountValue';
 
 export async function getClientActivity(userId, clientId) {
     const client = await Client.findOne({ _id: clientId, userId }).lean();
@@ -89,7 +94,7 @@ export async function getClientActivity(userId, clientId) {
             ...INVOICE_ONLY_FILTER,
             status: { $nin: inactiveDocStatuses },
         })
-            .select('invoiceNumber date status total amountPaid currency items documentType')
+            .select(DOC_SELECT_FIELDS)
             .sort({ date: -1, createdAt: -1 })
             .lean(),
         Invoice.find({
@@ -98,7 +103,7 @@ export async function getClientActivity(userId, clientId) {
             ...RECEIPT_ONLY_FILTER,
             status: { $nin: inactiveDocStatuses },
         })
-            .select('receiptNumber invoiceNumber date status total amountPaid currency items documentType')
+            .select(DOC_SELECT_FIELDS)
             .sort({ date: -1, createdAt: -1 })
             .lean(),
         Quotation.find({

@@ -69,6 +69,7 @@ import {
     getAllowOverselling,
     withStockWarnings,
 } from '../utils/inventory.js';
+import { snapshotItemUnitCosts } from '../utils/itemCostSnapshot.js';
 
 const router = express.Router();
 
@@ -86,6 +87,12 @@ const numberGenerators = {
     getNextInvoiceNumber,
     getNextReceiptNumber,
 };
+
+async function attachItemCostSnapshots(userId, payload) {
+    if (!payload || !Array.isArray(payload.items)) return payload;
+    payload.items = await snapshotItemUnitCosts(userId, payload.items);
+    return payload;
+}
 
 function toUserObjectId(userId) {
     if (userId instanceof mongoose.Types.ObjectId) return userId;
@@ -307,6 +314,7 @@ router.post('/', auth, requireEmailVerified, async (req, res) => {
             numberGenerators
         );
         attachPublicTokenIfNeeded(payload);
+        await attachItemCostSnapshots(req.user.userId, payload);
         const invoice = await Invoice.create({
             ...payload,
             userId: req.user.userId,
@@ -451,6 +459,8 @@ router.put('/:id', auth, requireEmailVerified, validateObjectId(), async (req, r
                 payload.receiptNumber ||
                 receiptFromInvoiceNumber(existing.invoiceNumber || payload.invoiceNumber);
         }
+
+        await attachItemCostSnapshots(req.user.userId, payload);
 
         const invoice = await Invoice.findOneAndUpdate(
             { _id: req.params.id, userId: req.user.userId },

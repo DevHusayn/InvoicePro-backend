@@ -27,6 +27,8 @@ const invoiceSchema = new mongoose.Schema({
                 ref: 'Product',
                 default: null,
             },
+            /** Snapshot of product unit cost at document save time. */
+            unitCost: { type: Number, default: undefined },
         }
     ],
     notes: String,

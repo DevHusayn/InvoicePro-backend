@@ -48,6 +48,7 @@ import {
     getAllowOverselling,
     withStockWarnings,
 } from '../utils/inventory.js';
+import { snapshotItemUnitCosts } from '../utils/itemCostSnapshot.js';
 
 const router = express.Router();
 
@@ -63,6 +64,12 @@ const RECEIPT_SORT = {
 const numberGenerators = {
     getNextReceiptNumber,
 };
+
+async function attachItemCostSnapshots(userId, payload) {
+    if (!payload || !Array.isArray(payload.items)) return payload;
+    payload.items = await snapshotItemUnitCosts(userId, payload.items);
+    return payload;
+}
 
 function toUserObjectId(userId) {
     if (userId instanceof mongoose.Types.ObjectId) return userId;
@@ -235,6 +242,7 @@ router.post('/', auth, requireEmailVerified, async (req, res) => {
             applyReceiptPaymentLedger(payload, { amount: paymentAmount });
             attachPublicTokenIfNeeded(payload);
         }
+        await attachItemCostSnapshots(req.user.userId, payload);
         const receipt = await Invoice.create({
             ...payload,
             userId: req.user.userId,
@@ -335,6 +343,8 @@ router.put('/:id', auth, requireEmailVerified, validateObjectId(), async (req, r
             applyReceiptPaymentLedger(payload, { amount: paymentAmount });
             attachPublicTokenIfNeeded(payload, existing);
         }
+
+        await attachItemCostSnapshots(req.user.userId, payload);
 
         const update = Object.fromEntries(
             Object.entries(payload).filter(([, value]) => value !== undefined)

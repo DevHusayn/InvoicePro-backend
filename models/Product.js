@@ -5,6 +5,8 @@ const productSchema = new mongoose.Schema({
     name: { type: String, required: true },
     description: { type: String, default: '' },
     unitPrice: { type: Number, default: 0 },
+    /** Cost of goods sold per unit — used for profit margin analytics. */
+    unitCost: { type: Number, default: 0 },
     trackInventory: { type: Boolean, default: false },
     quantityOnHand: { type: Number, default: 0 },
     lowStockThreshold: { type: Number, default: null },

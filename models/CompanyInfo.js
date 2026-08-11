@@ -43,6 +43,8 @@ const businessInfoSchema = new mongoose.Schema({
     lowStockEmailAlerts: { type: Boolean, default: false },
     /** Allow issuing documents that would push tracked stock below zero. Default off. */
     allowOverselling: { type: Boolean, default: false },
+    /** Update product unit cost using weighted average when PO stock is received. */
+    autoUpdateCostFromPO: { type: Boolean, default: false },
     /** Last low-stock digest sent to the owner (max one email per 24 hours). */
     lowStockEmailLastSentAt: { type: Date, default: null },
     /** Email the owner their monthly billing statement PDF (Premium). Default on. */

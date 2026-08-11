@@ -9,11 +9,16 @@ import { toBusinessInfoResponse } from './businessInfoHelpers.js';
 import { getCache, setCache, invalidateCachePrefix } from './cache.js';
 import { INVOICE_ONLY_FILTER, RECEIPT_ONLY_FILTER } from './invoiceDocumentFilter.js';
 import { MONEY_EPS } from './invoicePayments.js';
+import { amountPaidOf } from './realizedSales.js';
 import {
     buildDashboardAnalyticsFromDocs,
     buildPeriodSummaryFromDocs,
+    computeMoneyPercentChange,
     computeRevenueStatsFromDocs,
+    shiftSummaryPeriod,
 } from './dashboardAnalytics.js';
+import { computePeriodProfitFromDocs } from './profitAnalytics.js';
+import { loadProductCostMap } from './productCostResolver.js';
 import { getBusinessTimezone, parseSummaryPeriodQuery } from './timezone.js';
 
 const DASHBOARD_CACHE_TTL_MS = 30_000;
@@ -40,13 +45,6 @@ function roundMoney(value) {
     const n = Number(value);
     if (!Number.isFinite(n)) return 0;
     return Math.round(n * 100) / 100;
-}
-
-function amountPaidOf(inv) {
-    const recorded = roundMoney(inv.amountPaid);
-    if (recorded > 0) return recorded;
-    if (inv.status === 'paid') return roundMoney(inv.total);
-    return 0;
 }
 
 function balanceDueOf(inv) {
@@ -132,7 +130,7 @@ export async function getDashboardForUser(userId, { summaryYear, summaryMonth } 
         totalReceipts,
     ] = await Promise.all([
         Invoice.find(nonDraftFilter)
-            .select('date status total amountPaid documentType')
+            .select('date status total amountPaid documentType items discount discountType discountValue')
             .lean(),
         getBusinessTimezone(userId),
         Invoice.find({ ...nonDraftFilter, ...INVOICE_ONLY_FILTER })
@@ -189,6 +187,44 @@ export async function getDashboardForUser(userId, { summaryYear, summaryMonth } 
         timeZone,
     });
 
+    const productCostById = await loadProductCostMap(userId, analyticsDocs);
+
+    const resolvedPeriod = parseSummaryPeriodQuery(
+        { summaryYear, summaryMonth },
+        timeZone
+    );
+    const previousPeriod = shiftSummaryPeriod(resolvedPeriod.year, resolvedPeriod.month, -1);
+    const currentProfit = computePeriodProfitFromDocs(
+        analyticsDocs,
+        resolvedPeriod.year,
+        resolvedPeriod.month,
+        timeZone,
+        productCostById
+    );
+    const previousProfit = computePeriodProfitFromDocs(
+        analyticsDocs,
+        previousPeriod.year,
+        previousPeriod.month,
+        timeZone,
+        productCostById
+    );
+
+    const periodSummaryWithProfit = {
+        ...periodSummary,
+        current: {
+            ...periodSummary.current,
+            grossProfit: currentProfit.totals.grossProfit,
+            grossMarginPercent: currentProfit.totals.marginPercent,
+        },
+        comparison: {
+            ...periodSummary.comparison,
+            grossProfit: computeMoneyPercentChange(
+                currentProfit.totals.grossProfit,
+                previousProfit.totals.grossProfit
+            ),
+        },
+    };
+
     const [recentDocuments, overdueInvoices] = await Promise.all([
         attachClientNames(mergedRecent),
         attachClientNames(overdueRaw),
@@ -198,7 +234,7 @@ export async function getDashboardForUser(userId, { summaryYear, summaryMonth } 
 
     return {
         analytics,
-        periodSummary,
+        periodSummary: periodSummaryWithProfit,
         stats: {
             totalInvoices: revenueStats.totalInvoices,
             totalQuotations,

@@ -22,6 +22,8 @@ import { sendProductListExport } from '../utils/productListExport.js';
 import { adjustProductStock, getAllowOverselling } from '../utils/inventory.js';
 import { getProductActivity } from '../utils/productActivity.js';
 import { recordStockMovement } from '../utils/stockLedger.js';
+import { backfillMissingLineCostSnapshots } from '../utils/productCostResolver.js';
+import { invalidateDashboardCache } from '../utils/dashboardStats.js';
 
 const router = express.Router();
 
@@ -132,12 +134,18 @@ router.post('/', auth, asyncHandler(async (req, res) => {
         return res.status(400).json({ message: 'Product name is required' });
     }
 
+    const unitCost = Number(req.body.unitCost);
+    if (req.body.unitCost !== undefined && req.body.unitCost !== '' && (!Number.isFinite(unitCost) || unitCost < 0)) {
+        throw validationError('Unit cost must be zero or greater.');
+    }
+
     const inventoryFields = sanitizeInventoryFields(req.body);
     const product = await Product.create({
         userId: req.user.userId,
         name,
         description: String(req.body.description || '').trim(),
         unitPrice: Number(req.body.unitPrice) || 0,
+        unitCost: Number.isFinite(unitCost) && unitCost >= 0 ? unitCost : 0,
         ...inventoryFields,
     });
 
@@ -180,6 +188,13 @@ router.put('/:id', auth, validateObjectId(), asyncHandler(async (req, res) => {
     if (name !== undefined) updates.name = name;
     if (req.body.description !== undefined) updates.description = String(req.body.description).trim();
     if (req.body.unitPrice !== undefined) updates.unitPrice = Number(req.body.unitPrice) || 0;
+    if (req.body.unitCost !== undefined) {
+        const unitCost = Number(req.body.unitCost);
+        if (!Number.isFinite(unitCost) || unitCost < 0) {
+            throw validationError('Unit cost must be zero or greater.');
+        }
+        updates.unitCost = unitCost;
+    }
 
     Object.assign(
         updates,
@@ -209,6 +224,15 @@ router.put('/:id', auth, validateObjectId(), asyncHandler(async (req, res) => {
                 action: justEnabled ? 'opening' : 'set',
             });
         }
+    }
+
+    if (updates.unitCost !== undefined && Number(product.unitCost) > 0) {
+        await backfillMissingLineCostSnapshots(
+            req.user.userId,
+            product._id,
+            product.unitCost
+        );
+        invalidateDashboardCache(req.user.userId);
     }
 
     res.json(product);

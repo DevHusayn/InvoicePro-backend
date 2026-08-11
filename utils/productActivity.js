@@ -6,8 +6,15 @@ import Product from '../models/Product.js';
 import { INVOICE_ONLY_FILTER, RECEIPT_ONLY_FILTER } from './invoiceDocumentFilter.js';
 import { getBusinessTimezone, getYearMonthInTimezone, getUtcRangeForMonthInTimezone } from './timezone.js';
 import { getStockHistory } from './stockLedger.js';
-
-const INACTIVE_STATUSES = new Set(['draft', 'cancelled']);
+import {
+    computeDocumentDiscountRatio,
+    roundMoney,
+} from './documentLineMath.js';
+import {
+    computePaidRatio,
+    docCountsAsRealizedSale,
+    scaleByPaidRatio,
+} from './realizedSales.js';
 
 function resolvePaymentMethod(doc) {
     if (Array.isArray(doc.payments) && doc.payments.length > 0) {
@@ -23,19 +30,33 @@ function extractMatchingItems(items, productId) {
     return items.filter((item) => item?.productId && String(item.productId) === target);
 }
 
-function sumMatchingLines(items, productId) {
+function sumMatchingLines(items, productId, catalogUnitCost = 0, discountRatio = 0) {
     const matches = extractMatchingItems(items, productId);
     let quantity = 0;
     let lineTotal = 0;
+    let lineCogs = 0;
 
     for (const item of matches) {
         const qty = Number(item.quantity) || 0;
         const rate = Number(item.rate) || 0;
+        const snapshotCost = Number(item.unitCost) || 0;
+        const unitCost = snapshotCost > 0 ? snapshotCost : Number(catalogUnitCost) || 0;
         quantity += qty;
         lineTotal += qty * rate;
+        lineCogs += qty * unitCost;
     }
 
-    return { quantity, lineTotal, matches };
+    const adjustedLineTotal = roundMoney(lineTotal * (1 - discountRatio));
+    const adjustedLineProfit = roundMoney(adjustedLineTotal - lineCogs);
+
+    return {
+        quantity,
+        lineTotal: roundMoney(lineTotal),
+        adjustedLineTotal,
+        lineCogs: roundMoney(lineCogs),
+        adjustedLineProfit,
+        matches,
+    };
 }
 
 function resolveClientName(client, clientId) {
@@ -50,9 +71,38 @@ function resolveDocumentNumber(doc, documentType) {
     return doc.invoiceNumber || '—';
 }
 
-function buildTransaction(doc, documentType, productId, clientMap) {
-    const { quantity, lineTotal } = sumMatchingLines(doc.items, productId);
-    if (quantity <= 0 && lineTotal <= 0) return null;
+function computeInvoiceLineUnpaidRatio(doc, documentType) {
+    if (documentType !== 'invoice') return 0;
+
+    const status = doc.status;
+    if (status === 'pending' || status === 'overdue') return 1;
+
+    if (status === 'partial') {
+        const paidRatio = computePaidRatio(doc);
+        return Math.max(0, 1 - paidRatio);
+    }
+
+    return 0;
+}
+
+function buildTransaction(doc, documentType, productId, clientMap, catalogUnitCost = 0) {
+    const discountRatio =
+        documentType === 'quotation' ? 0 : computeDocumentDiscountRatio(doc, doc.items);
+    const sums = sumMatchingLines(doc.items, productId, catalogUnitCost, discountRatio);
+    if (sums.quantity <= 0 && sums.lineTotal <= 0) return null;
+
+    const countsAsSale = documentType !== 'quotation' && docCountsAsRealizedSale(doc);
+    const paidRatio = countsAsSale ? computePaidRatio(doc) : 0;
+    const saleMetrics = scaleByPaidRatio(
+        sums.quantity,
+        sums.adjustedLineTotal,
+        sums.adjustedLineProfit,
+        paidRatio
+    );
+
+    const unpaidRatio = computeInvoiceLineUnpaidRatio(doc, documentType);
+    const pendingLineTotal = roundMoney(sums.adjustedLineTotal * unpaidRatio);
+    const pendingQuantity = sums.quantity * unpaidRatio;
 
     const clientId = doc.clientId ? String(doc.clientId._id || doc.clientId) : null;
     const client = clientId ? clientMap.get(clientId) : null;
@@ -64,15 +114,23 @@ function buildTransaction(doc, documentType, productId, clientMap) {
         date: doc.date || null,
         clientId,
         clientName: resolveClientName(client, clientId),
-        quantity,
-        lineTotal,
+        quantity: sums.quantity,
+        lineTotal: sums.lineTotal,
+        adjustedLineTotal: sums.adjustedLineTotal,
+        lineProfit: sums.adjustedLineProfit,
+        countsAsSale,
+        saleQuantity: saleMetrics.quantity,
+        saleLineTotal: saleMetrics.lineTotal,
+        saleLineProfit: saleMetrics.lineProfit,
+        pendingQuantity,
+        pendingLineTotal,
         status: doc.status || null,
         paymentMethod: documentType === 'quotation' ? null : resolvePaymentMethod(doc),
     };
 }
 
 function upsertClientRollup(map, transaction) {
-    if (!transaction.clientId) return;
+    if (!transaction.clientId || !transaction.countsAsSale) return;
 
     const existing = map.get(transaction.clientId) || {
         clientId: transaction.clientId,
@@ -83,8 +141,8 @@ function upsertClientRollup(map, transaction) {
         lastPaymentMethod: null,
     };
 
-    existing.quantitySold += transaction.quantity;
-    existing.revenue += transaction.lineTotal;
+    existing.quantitySold += transaction.saleQuantity;
+    existing.revenue += transaction.saleLineTotal;
 
     if (
         transaction.date
@@ -100,6 +158,9 @@ function upsertClientRollup(map, transaction) {
 function isSoldTransaction(documentType) {
     return documentType === 'invoice' || documentType === 'receipt';
 }
+
+const DOC_SELECT_FIELDS =
+    'invoiceNumber receiptNumber date clientId items status paymentMethod payments total amountPaid discount discountType discountValue documentType';
 
 /**
  * Aggregate catalog-linked sales activity for a product.
@@ -118,7 +179,7 @@ export async function getProductActivity(userId, productId) {
             ...itemFilter,
             status: { $nin: ['draft', 'cancelled'] },
         })
-            .select('invoiceNumber date clientId items status paymentMethod payments')
+            .select(DOC_SELECT_FIELDS)
             .sort({ date: -1, createdAt: -1 })
             .lean(),
         Invoice.find({
@@ -127,7 +188,7 @@ export async function getProductActivity(userId, productId) {
             ...itemFilter,
             status: { $nin: ['draft', 'cancelled'] },
         })
-            .select('receiptNumber invoiceNumber date clientId items status paymentMethod payments')
+            .select(DOC_SELECT_FIELDS)
             .sort({ date: -1, createdAt: -1 })
             .lean(),
         Quotation.find({
@@ -157,24 +218,30 @@ export async function getProductActivity(userId, productId) {
     const transactions = [];
     const clientRollup = new Map();
 
+    const catalogUnitCost = product.unitCost ?? 0;
+
     for (const doc of invoices) {
-        const row = buildTransaction(doc, 'invoice', productId, clientMap);
+        const row = buildTransaction(doc, 'invoice', productId, clientMap, catalogUnitCost);
         if (row) {
             transactions.push(row);
-            upsertClientRollup(clientRollup, row);
+            if (row.countsAsSale) {
+                upsertClientRollup(clientRollup, row);
+            }
         }
     }
 
     for (const doc of receipts) {
-        const row = buildTransaction(doc, 'receipt', productId, clientMap);
+        const row = buildTransaction(doc, 'receipt', productId, clientMap, catalogUnitCost);
         if (row) {
             transactions.push(row);
-            upsertClientRollup(clientRollup, row);
+            if (row.countsAsSale) {
+                upsertClientRollup(clientRollup, row);
+            }
         }
     }
 
     for (const doc of quotations) {
-        const row = buildTransaction(doc, 'quotation', productId, clientMap);
+        const row = buildTransaction(doc, 'quotation', productId, clientMap, catalogUnitCost);
         if (row) transactions.push(row);
     }
 
@@ -194,22 +261,27 @@ export async function getProductActivity(userId, productId) {
     let totalRevenue = 0;
     let soldThisMonthQty = 0;
     let soldThisMonthRevenue = 0;
-    let quotedQuantity = 0;
+    let pendingQuantity = 0;
+    let pendingRevenue = 0;
 
     for (const row of transactions) {
         if (row.documentType === 'quotation') {
-            quotedQuantity += row.quantity;
             continue;
         }
 
-        if (!isSoldTransaction(row.documentType)) continue;
+        if (row.pendingQuantity > 0) {
+            pendingQuantity += row.pendingQuantity;
+            pendingRevenue += row.pendingLineTotal;
+        }
 
-        totalQuantitySold += row.quantity;
-        totalRevenue += row.lineTotal;
+        if (!isSoldTransaction(row.documentType) || !row.countsAsSale) continue;
+
+        totalQuantitySold += row.saleQuantity;
+        totalRevenue += row.saleLineTotal;
 
         if (row.date && row.date >= monthStart && row.date < monthEnd) {
-            soldThisMonthQty += row.quantity;
-            soldThisMonthRevenue += row.lineTotal;
+            soldThisMonthQty += row.saleQuantity;
+            soldThisMonthRevenue += row.saleLineTotal;
         }
     }
 
@@ -219,19 +291,23 @@ export async function getProductActivity(userId, productId) {
             name: product.name,
             description: product.description || '',
             unitPrice: product.unitPrice ?? 0,
+            unitCost: product.unitCost ?? 0,
             trackInventory: Boolean(product.trackInventory),
             quantityOnHand: product.quantityOnHand ?? 0,
             lowStockThreshold: product.lowStockThreshold ?? null,
         },
         summary: {
             totalQuantitySold,
-            totalRevenue,
+            totalRevenue: roundMoney(totalRevenue),
             uniqueClients: clientRollup.size,
             soldThisMonthQty,
-            soldThisMonthRevenue,
-            quotedQuantity,
+            soldThisMonthRevenue: roundMoney(soldThisMonthRevenue),
+            pendingQuantity,
+            pendingRevenue: roundMoney(pendingRevenue),
         },
-        byClient: [...clientRollup.values()].sort((a, b) => b.revenue - a.revenue),
+        byClient: [...clientRollup.values()]
+            .map((row) => ({ ...row, revenue: roundMoney(row.revenue) }))
+            .sort((a, b) => b.revenue - a.revenue),
         transactions,
         stockHistory: product.trackInventory
             ? await getStockHistory(userId, product._id)

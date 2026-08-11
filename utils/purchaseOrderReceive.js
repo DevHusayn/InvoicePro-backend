@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import Product from '../models/Product.js';
+import BusinessInfo from '../models/CompanyInfo.js';
 import {
     PO_CANCELLED,
     PO_DRAFT,
@@ -10,6 +11,22 @@ import {
     computePurchaseOrderStatus,
 } from './purchaseOrderValidation.js';
 import { recordStockMovement } from './stockLedger.js';
+import { computeWeightedAverageCost } from './itemCostSnapshot.js';
+
+async function shouldAutoUpdateCostFromPO(userId) {
+    const info = await BusinessInfo.findOne({ userId }).select('autoUpdateCostFromPO').lean();
+    return Boolean(info?.autoUpdateCostFromPO);
+}
+
+async function updateProductCostFromReceive(userId, productId, receivedQty, poRate) {
+    const product = await Product.findOne({ _id: productId, userId });
+    if (!product) return;
+
+    const newQty = Number(product.quantityOnHand) || 0;
+    const oldQty = Math.max(0, newQty - (Number(receivedQty) || 0));
+    product.unitCost = computeWeightedAverageCost(oldQty, product.unitCost, receivedQty, poRate);
+    await product.save();
+}
 
 function validationError(message, status = 400) {
     const err = new Error(message);
@@ -97,6 +114,7 @@ export async function receivePurchaseOrderLines(userId, purchaseOrder, receiveLi
             stockUpdates.push({
                 productId: item.productId,
                 delta: line.quantity,
+                poRate: Number(item.rate) || 0,
             });
         }
     }
@@ -110,6 +128,7 @@ export async function receivePurchaseOrderLines(userId, purchaseOrder, receiveLi
         documentNumber: purchaseOrder.purchaseOrderNumber || null,
         note: '',
     };
+    const autoUpdateCost = await shouldAutoUpdateCostFromPO(userId);
 
     if (mongoose.connection.readyState === 1 && stockUpdates.length > 1) {
         const session = await mongoose.startSession();
@@ -117,6 +136,14 @@ export async function receivePurchaseOrderLines(userId, purchaseOrder, receiveLi
             await session.withTransaction(async () => {
                 for (const update of stockUpdates) {
                     await applyReceiveDelta(userId, update.productId, update.delta, session, poMeta);
+                    if (autoUpdateCost) {
+                        await updateProductCostFromReceive(
+                            userId,
+                            update.productId,
+                            update.delta,
+                            update.poRate
+                        );
+                    }
                 }
                 await purchaseOrder.save({ session });
             });
@@ -126,6 +153,14 @@ export async function receivePurchaseOrderLines(userId, purchaseOrder, receiveLi
     } else {
         for (const update of stockUpdates) {
             await applyReceiveDelta(userId, update.productId, update.delta, null, poMeta);
+            if (autoUpdateCost) {
+                await updateProductCostFromReceive(
+                    userId,
+                    update.productId,
+                    update.delta,
+                    update.poRate
+                );
+            }
         }
         await purchaseOrder.save();
     }
