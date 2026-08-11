@@ -19,8 +19,9 @@ import {
 import { parseListMonthQuery } from '../utils/listMonthFilter.js';
 import { getBusinessTimezone, getUtcRangeForMonthInTimezone } from '../utils/timezone.js';
 import { sendProductListExport } from '../utils/productListExport.js';
-import { adjustProductStock } from '../utils/inventory.js';
+import { adjustProductStock, getAllowOverselling } from '../utils/inventory.js';
 import { getProductActivity } from '../utils/productActivity.js';
+import { recordStockMovement } from '../utils/stockLedger.js';
 
 const router = express.Router();
 
@@ -139,6 +140,18 @@ router.post('/', auth, asyncHandler(async (req, res) => {
         unitPrice: Number(req.body.unitPrice) || 0,
         ...inventoryFields,
     });
+
+    if (product.trackInventory && Number(product.quantityOnHand) > 0) {
+        await recordStockMovement({
+            userId: req.user.userId,
+            productId: product._id,
+            delta: product.quantityOnHand,
+            balanceAfter: product.quantityOnHand,
+            source: 'opening',
+            action: 'opening',
+        });
+    }
+
     res.status(201).json(product);
 }));
 
@@ -173,11 +186,31 @@ router.put('/:id', auth, validateObjectId(), asyncHandler(async (req, res) => {
         sanitizeInventoryFields(req.body, { existing })
     );
 
+    const previousQty = Number(existing.quantityOnHand ?? 0);
+    const nextTracksInventory = updates.trackInventory ?? existing.trackInventory;
+    const nextQty = updates.quantityOnHand ?? previousQty;
+
     const product = await Product.findOneAndUpdate(
         { _id: req.params.id, userId: req.user.userId },
         updates,
         { new: true }
     );
+
+    if (product?.trackInventory && nextTracksInventory) {
+        const delta = nextQty - previousQty;
+        if (delta !== 0) {
+            const justEnabled = !existing.trackInventory && product.trackInventory;
+            await recordStockMovement({
+                userId: req.user.userId,
+                productId: product._id,
+                delta,
+                balanceAfter: product.quantityOnHand ?? 0,
+                source: justEnabled ? 'opening' : 'set',
+                action: justEnabled ? 'opening' : 'set',
+            });
+        }
+    }
+
     res.json(product);
 }));
 
@@ -187,7 +220,10 @@ router.post('/:id/adjust-stock', auth, validateObjectId(), asyncHandler(async (r
         return res.status(400).json({ message: 'A non-zero numeric delta is required.' });
     }
 
-    const product = await adjustProductStock(req.user.userId, req.params.id, delta);
+    const allowOverselling = await getAllowOverselling(req.user.userId);
+    const product = await adjustProductStock(req.user.userId, req.params.id, delta, null, {
+        allowOverselling,
+    });
     if (!product) {
         return res.status(404).json({ message: 'Product not found or inventory is not tracked.' });
     }

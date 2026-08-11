@@ -41,6 +41,8 @@ const businessInfoSchema = new mongoose.Schema({
     autoPaymentReminders: { type: Boolean, default: true },
     /** Email owner a daily digest when tracked products fall at or below their low-stock threshold. */
     lowStockEmailAlerts: { type: Boolean, default: false },
+    /** Allow issuing documents that would push tracked stock below zero. Default off. */
+    allowOverselling: { type: Boolean, default: false },
     /** Last low-stock digest sent to the owner (max one email per 24 hours). */
     lowStockEmailLastSentAt: { type: Date, default: null },
     /** Email the owner their monthly billing statement PDF (Premium). Default on. */

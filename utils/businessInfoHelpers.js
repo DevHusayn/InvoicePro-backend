@@ -52,6 +52,7 @@ const ALLOWED_UPDATE_FIELDS = [
     'autoEmailInvoices',
     'autoPaymentReminders',
     'lowStockEmailAlerts',
+    'allowOverselling',
     'autoEmailMonthlyStatements',
 ];
 
@@ -182,6 +183,10 @@ export function pickAllowedBusinessUpdates(body, { allowPlan = false, premium = 
         updates.lowStockEmailAlerts = Boolean(updates.lowStockEmailAlerts);
     }
 
+    if (updates.allowOverselling !== undefined) {
+        updates.allowOverselling = Boolean(updates.allowOverselling);
+    }
+
     if (updates.autoEmailMonthlyStatements !== undefined) {
         updates.autoEmailMonthlyStatements = Boolean(updates.autoEmailMonthlyStatements);
     }
@@ -271,6 +276,7 @@ export function toBusinessInfoResponse(doc, { includeAssets = true } = {}) {
         autoEmailInvoices: Boolean(o.autoEmailInvoices),
         autoPaymentReminders: o.autoPaymentReminders !== false,
         lowStockEmailAlerts: Boolean(o.lowStockEmailAlerts),
+        allowOverselling: Boolean(o.allowOverselling),
         autoEmailMonthlyStatements: o.autoEmailMonthlyStatements !== false,
     };
 }
@@ -330,5 +336,6 @@ export const defaultBusinessInfoFields = {
     autoEmailInvoices: false,
     autoPaymentReminders: true,
     lowStockEmailAlerts: false,
+    allowOverselling: false,
     autoEmailMonthlyStatements: true,
 };

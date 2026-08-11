@@ -26,6 +26,7 @@ import { attachPublicTokenIfNeeded } from '../utils/invoicePublicToken.js';
 import {
     applyInventoryTransition,
     checkStockWarnings,
+    getAllowOverselling,
 } from '../utils/inventory.js';
 import { syncExpiredQuotationsForUser } from '../utils/quotationExpire.js';
 import {
@@ -450,14 +451,18 @@ router.post('/:id/convert', auth, requireEmailVerified, validateObjectId(), asyn
         invoice.publicToken = tokenPayload.publicToken;
         await invoice.save();
 
-        const stockWarnings = await checkStockWarnings(req.user.userId, {
-            prevDoc: null,
-            nextDoc: invoice,
-        });
+        const allowOverselling = await getAllowOverselling(req.user.userId);
+        const stockWarnings = allowOverselling
+            ? await checkStockWarnings(req.user.userId, {
+                prevDoc: null,
+                nextDoc: invoice,
+            })
+            : [];
         await applyInventoryTransition({
             userId: req.user.userId,
             prevDoc: null,
             nextDoc: invoice,
+            allowOverselling,
         });
 
         quotation.status = 'converted';

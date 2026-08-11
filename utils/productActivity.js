@@ -5,6 +5,7 @@ import Client from '../models/Client.js';
 import Product from '../models/Product.js';
 import { INVOICE_ONLY_FILTER, RECEIPT_ONLY_FILTER } from './invoiceDocumentFilter.js';
 import { getBusinessTimezone, getYearMonthInTimezone, getUtcRangeForMonthInTimezone } from './timezone.js';
+import { getStockHistory } from './stockLedger.js';
 
 const INACTIVE_STATUSES = new Set(['draft', 'cancelled']);
 
@@ -232,5 +233,8 @@ export async function getProductActivity(userId, productId) {
         },
         byClient: [...clientRollup.values()].sort((a, b) => b.revenue - a.revenue),
         transactions,
+        stockHistory: product.trackInventory
+            ? await getStockHistory(userId, product._id)
+            : [],
     };
 }

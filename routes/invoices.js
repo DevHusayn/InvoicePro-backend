@@ -66,6 +66,7 @@ import { sendInvoiceListExport } from '../utils/invoiceListExport.js';
 import {
     applyInventoryTransition,
     checkStockWarnings,
+    getAllowOverselling,
     withStockWarnings,
 } from '../utils/inventory.js';
 
@@ -310,14 +311,18 @@ router.post('/', auth, requireEmailVerified, async (req, res) => {
             ...payload,
             userId: req.user.userId,
         });
-        const stockWarnings = await checkStockWarnings(req.user.userId, {
-            prevDoc: null,
-            nextDoc: invoice,
-        });
+        const allowOverselling = await getAllowOverselling(req.user.userId);
+        const stockWarnings = allowOverselling
+            ? await checkStockWarnings(req.user.userId, {
+                prevDoc: null,
+                nextDoc: invoice,
+            })
+            : [];
         await applyInventoryTransition({
             userId: req.user.userId,
             prevDoc: null,
             nextDoc: invoice,
+            allowOverselling,
         });
         if (!isDraft) {
             await tryAutoEmailInvoice({ invoice, userId: req.user.userId });
@@ -477,14 +482,18 @@ router.put('/:id', auth, requireEmailVerified, validateObjectId(), async (req, r
             await tryAutoEmailInvoice({ invoice, userId: req.user.userId });
         }
 
-        const stockWarnings = await checkStockWarnings(req.user.userId, {
-            prevDoc: existing,
-            nextDoc: invoice,
-        });
+        const allowOverselling = await getAllowOverselling(req.user.userId);
+        const stockWarnings = allowOverselling
+            ? await checkStockWarnings(req.user.userId, {
+                prevDoc: existing,
+                nextDoc: invoice,
+            })
+            : [];
         await applyInventoryTransition({
             userId: req.user.userId,
             prevDoc: existing,
             nextDoc: invoice,
+            allowOverselling,
         });
 
         res.json(withStockWarnings(invoice, stockWarnings));
