@@ -47,7 +47,8 @@ function sumMatchingLines(items, productId, catalogUnitCost = 0, discountRatio =
     }
 
     const adjustedLineTotal = roundMoney(lineTotal * (1 - discountRatio));
-    const adjustedLineProfit = roundMoney(adjustedLineTotal - lineCogs);
+    const adjustedLineProfit =
+        lineCogs > 0 ? roundMoney(adjustedLineTotal - lineCogs) : 0;
 
     return {
         quantity,

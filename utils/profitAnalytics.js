@@ -19,6 +19,12 @@ import {
     computePaidRatio,
     docCountsAsRealizedSale,
 } from './realizedSales.js';
+import {
+    getExpenseRecordsForUser,
+    buildExpenseSummaryFromRecords,
+    computePeriodExpensesFromRecords,
+    mergeExpensesIntoProfitSummary,
+} from './expenseAnalytics.js';
 
 export { loadProductCostMap };
 
@@ -80,6 +86,7 @@ export function computeDocumentProfit(doc, productCostById = null) {
     const discountRatio = computeDocumentDiscountRatio(doc, items);
 
     let revenue = 0;
+    let costedRevenue = 0;
     let cogs = 0;
     let linesWithCost = 0;
     let linesMissingCost = 0;
@@ -95,6 +102,7 @@ export function computeDocumentProfit(doc, productCostById = null) {
         revenue += adjustedRevenue;
         if (item.productId) {
             if (hasCost) {
+                costedRevenue += adjustedRevenue;
                 cogs += qty * unitCost;
                 linesWithCost += 1;
             } else {
@@ -104,8 +112,9 @@ export function computeDocumentProfit(doc, productCostById = null) {
     }
 
     revenue = roundMoney(revenue * paidRatio);
+    costedRevenue = roundMoney(costedRevenue * paidRatio);
     cogs = roundMoney(cogs * paidRatio);
-    const grossProfit = roundMoney(revenue - cogs);
+    const grossProfit = roundMoney(costedRevenue - cogs);
 
     return {
         revenue,
@@ -160,9 +169,10 @@ export function computePeriodProfitFromDocs(docs, year, month, timeZone, product
             const qty = Number(item.quantity) || 0;
             const rate = Number(item.rate) || 0;
             const unitCost = resolveLineUnitCost(item, productCostById);
+            const hasCost = lineHasCostData(item, productCostById);
             const lineRevenue = roundMoney(qty * rate * (1 - discountRatio) * paidRatio);
-            const lineCogs = unitCost > 0 ? roundMoney(qty * unitCost * paidRatio) : 0;
-            const lineProfit = roundMoney(lineRevenue - lineCogs);
+            const lineCogs = hasCost ? roundMoney(qty * unitCost * paidRatio) : 0;
+            const lineProfit = hasCost ? roundMoney(lineRevenue - lineCogs) : 0;
 
             const existing = byProduct.get(productId) || {
                 productId,
@@ -186,7 +196,7 @@ export function computePeriodProfitFromDocs(docs, year, month, timeZone, product
     totals.revenue = roundMoney(totals.revenue);
     totals.cogs = roundMoney(totals.cogs);
     totals.grossProfit = roundMoney(totals.grossProfit);
-    totals.marginPercent = computeMarginPercent(totals.revenue, totals.grossProfit);
+    totals.marginPercent = computeMarginPercent(totals.cogs + totals.grossProfit, totals.grossProfit);
 
     const byProductRows = [...byProduct.values()]
         .map((row) => ({
@@ -195,7 +205,7 @@ export function computePeriodProfitFromDocs(docs, year, month, timeZone, product
             cogs: roundMoney(row.cogs),
             grossProfit: roundMoney(row.grossProfit),
             qtySold: roundMoney(row.qtySold),
-            marginPercent: computeMarginPercent(row.revenue, row.grossProfit),
+            marginPercent: computeMarginPercent(row.cogs + row.grossProfit, row.grossProfit),
         }))
         .sort((a, b) => b.grossProfit - a.grossProfit);
 
@@ -224,18 +234,20 @@ export function buildProfitTrendFromDocs(
         const docProfit = computeDocumentProfit(doc, productCostById);
         bucket.grossProfit = (bucket.grossProfit || 0) + docProfit.grossProfit;
         bucket.revenue = (bucket.revenue || 0) + docProfit.revenue;
+        bucket.cogs = (bucket.cogs || 0) + docProfit.cogs;
     }
 
     return buckets.map((bucket) => {
         const grossProfit = roundMoney(bucket.grossProfit || 0);
         const revenue = roundMoney(bucket.revenue || 0);
+        const cogs = roundMoney(bucket.cogs || 0);
         return {
             year: bucket.year,
             month: bucket.month,
             label: bucket.label,
             grossProfit,
             revenue,
-            marginPercent: computeMarginPercent(revenue, grossProfit),
+            marginPercent: computeMarginPercent(cogs + grossProfit, grossProfit),
         };
     });
 }
@@ -327,7 +339,51 @@ export async function getProfitSummaryForUser(userId, { year, month, timeZone, m
         name: nameById.get(row.productId) || row.name,
     }));
 
-    return summary;
+    const expenses = await getExpenseRecordsForUser(userId);
+    const tz = normalizeTimezone(timeZone);
+    const resolvedPeriod =
+        Number.isFinite(year) && Number.isFinite(month)
+            ? { year, month }
+            : getYearMonthInTimezone(tz);
+    const previousPeriod = shiftSummaryPeriod(resolvedPeriod.year, resolvedPeriod.month, -1);
+
+    const currentExpenseTotals = computePeriodExpensesFromRecords(
+        expenses,
+        resolvedPeriod.year,
+        resolvedPeriod.month,
+        tz
+    );
+    const previousPeriodProfit = computePeriodProfitFromDocs(
+        docs,
+        previousPeriod.year,
+        previousPeriod.month,
+        tz,
+        productCostById
+    );
+    const previousExpenseTotals = {
+        ...computePeriodExpensesFromRecords(
+            expenses,
+            previousPeriod.year,
+            previousPeriod.month,
+            tz
+        ),
+        grossProfit: previousPeriodProfit.totals.grossProfit,
+        revenue: previousPeriodProfit.totals.revenue,
+    };
+
+    const expenseSummary = buildExpenseSummaryFromRecords(expenses, {
+        year,
+        month,
+        timeZone: tz,
+        months,
+    });
+
+    return mergeExpensesIntoProfitSummary(summary, {
+        currentExpenseTotals,
+        previousExpenseTotals,
+        expenseTrend: expenseSummary.trend,
+        byCategory: expenseSummary.byCategory,
+    });
 }
 
 /** Lightweight period profit totals for dashboard stat cards. */

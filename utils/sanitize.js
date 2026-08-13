@@ -193,3 +193,83 @@ export function sanitizeSupplierUpdates(body) {
     }
     return updates;
 }
+
+const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+export function sanitizeExpenseDate(value) {
+    const date = sanitizePlainText(value, 10);
+    if (!ISO_DATE_PATTERN.test(date)) {
+        const err = new Error('Please enter a valid expense date.');
+        err.status = 400;
+        throw err;
+    }
+    const parsed = new Date(`${date}T12:00:00.000Z`);
+    if (Number.isNaN(parsed.getTime())) {
+        const err = new Error('Please enter a valid expense date.');
+        err.status = 400;
+        throw err;
+    }
+    return date;
+}
+
+export function sanitizeExpenseAmount(value) {
+    const amount = Number(value);
+    if (!Number.isFinite(amount) || amount <= 0) {
+        const err = new Error('Expense amount must be greater than zero.');
+        err.status = 400;
+        throw err;
+    }
+    return Math.round(amount * 100) / 100;
+}
+
+function sanitizeExpenseCategoryValue(value) {
+    const category = sanitizePlainText(value, 50);
+    if (!category) {
+        const err = new Error('Please enter an expense category.');
+        err.status = 400;
+        throw err;
+    }
+    return category;
+}
+
+export function sanitizeExpensePayload(body) {
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+        const err = new Error('Invalid expense payload.');
+        err.status = 400;
+        throw err;
+    }
+
+    return {
+        date: sanitizeExpenseDate(body.date),
+        amount: sanitizeExpenseAmount(body.amount),
+        category: sanitizeExpenseCategoryValue(body.category),
+        description: sanitizePlainText(body.description, 500),
+        vendor: sanitizePlainText(body.vendor, 200),
+    };
+}
+
+export function sanitizeExpenseUpdates(body) {
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+        const err = new Error('Invalid expense payload.');
+        err.status = 400;
+        throw err;
+    }
+
+    const updates = {};
+    if (body.date !== undefined) {
+        updates.date = sanitizeExpenseDate(body.date);
+    }
+    if (body.amount !== undefined) {
+        updates.amount = sanitizeExpenseAmount(body.amount);
+    }
+    if (body.category !== undefined) {
+        updates.category = sanitizeExpenseCategoryValue(body.category);
+    }
+    if (body.description !== undefined) {
+        updates.description = sanitizePlainText(body.description, 500);
+    }
+    if (body.vendor !== undefined) {
+        updates.vendor = sanitizePlainText(body.vendor, 200);
+    }
+    return updates;
+}

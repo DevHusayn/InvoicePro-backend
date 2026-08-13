@@ -78,7 +78,29 @@ test('computeDocumentProfit tracks lines missing cost data', () => {
     const profit = computeDocumentProfit(doc);
     assert.equal(profit.linesMissingCost, 1);
     assert.equal(profit.linesWithCost, 0);
-    assert.equal(profit.grossProfit, 500);
+    assert.equal(profit.revenue, 500);
+    assert.equal(profit.grossProfit, 0);
+});
+
+test('computeDocumentProfit excludes manual line items from gross profit', () => {
+    const doc = {
+        status: 'paid',
+        total: 500,
+        amountPaid: 500,
+        discount: 0,
+        items: [
+            {
+                description: 'Consulting',
+                quantity: 1,
+                rate: 500,
+            },
+        ],
+    };
+
+    const profit = computeDocumentProfit(doc);
+    assert.equal(profit.revenue, 500);
+    assert.equal(profit.grossProfit, 0);
+    assert.equal(profit.linesMissingCost, 0);
 });
 
 test('computeDocumentProfit falls back to catalog cost when line snapshot is missing', () => {

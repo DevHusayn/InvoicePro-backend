@@ -18,6 +18,7 @@ import {
     shiftSummaryPeriod,
 } from './dashboardAnalytics.js';
 import { computePeriodProfitFromDocs } from './profitAnalytics.js';
+import { getExpenseRecordsForUser, computePeriodExpensesFromRecords } from './expenseAnalytics.js';
 import { loadProductCostMap } from './productCostResolver.js';
 import { getBusinessTimezone, parseSummaryPeriodQuery } from './timezone.js';
 
@@ -209,12 +210,34 @@ export async function getDashboardForUser(userId, { summaryYear, summaryMonth } 
         productCostById
     );
 
+    const expenses = await getExpenseRecordsForUser(userId);
+    const currentExpenseTotals = computePeriodExpensesFromRecords(
+        expenses,
+        resolvedPeriod.year,
+        resolvedPeriod.month,
+        timeZone
+    );
+    const previousExpenseTotals = computePeriodExpensesFromRecords(
+        expenses,
+        previousPeriod.year,
+        previousPeriod.month,
+        timeZone
+    );
+    const netProfit = roundMoney(
+        currentProfit.totals.grossProfit - currentExpenseTotals.totalExpenses
+    );
+    const previousNetProfit = roundMoney(
+        previousProfit.totals.grossProfit - previousExpenseTotals.totalExpenses
+    );
+
     const periodSummaryWithProfit = {
         ...periodSummary,
         current: {
             ...periodSummary.current,
             grossProfit: currentProfit.totals.grossProfit,
             grossMarginPercent: currentProfit.totals.marginPercent,
+            totalExpenses: currentExpenseTotals.totalExpenses,
+            netProfit,
         },
         comparison: {
             ...periodSummary.comparison,
@@ -222,6 +245,11 @@ export async function getDashboardForUser(userId, { summaryYear, summaryMonth } 
                 currentProfit.totals.grossProfit,
                 previousProfit.totals.grossProfit
             ),
+            totalExpenses: computeMoneyPercentChange(
+                currentExpenseTotals.totalExpenses,
+                previousExpenseTotals.totalExpenses
+            ),
+            netProfit: computeMoneyPercentChange(netProfit, previousNetProfit),
         },
     };
 
