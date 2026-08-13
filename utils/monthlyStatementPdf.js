@@ -15,7 +15,7 @@ function hexToRgb(hex) {
 
 function formatMoney(value, currencySymbol) {
     return `${currencySymbol} ${Number(value || 0).toLocaleString('en-US', {
-        minimumFractionDigits: 2,
+        minimumFractionDigits: 0,
         maximumFractionDigits: 2,
     })}`;
 }

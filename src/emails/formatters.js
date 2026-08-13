@@ -10,10 +10,15 @@ export function formatCurrency(amount, currency = 'NGN') {
         return new Intl.NumberFormat('en-NG', {
             style: 'currency',
             currency: currency || 'NGN',
-            minimumFractionDigits: 2,
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 2,
         }).format(numericAmount);
     } catch {
-        return `${currency || 'NGN'} ${numericAmount.toFixed(2)}`;
+        const formatted = numericAmount.toLocaleString('en-NG', {
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 2,
+        });
+        return `${currency || 'NGN'} ${formatted}`;
     }
 }
 
