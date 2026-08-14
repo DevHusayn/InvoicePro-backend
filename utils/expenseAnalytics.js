@@ -3,10 +3,14 @@ import Expense from '../models/Expense.js';
 import {
     buildRevenueTrendBuckets,
     computeMoneyPercentChange,
-    formatTrendMonthLabel,
-    shiftSummaryPeriod,
 } from './dashboardAnalytics.js';
-import { getYearMonthInTimezone, normalizeTimezone } from './timezone.js';
+import {
+    dateMatchesPeriod,
+    formatAnalyticsPeriodLabel,
+    getYearMonthInTimezone,
+    normalizeTimezone,
+    previousAnalyticsPeriod,
+} from './timezone.js';
 import { computeMarginPercent, roundMoney } from './documentLineMath.js';
 import { EXPENSE_CATEGORIES, getExpenseCategoryLabel } from './expenseCategories.js';
 
@@ -21,12 +25,16 @@ function bucketKey(year, month) {
     return `${year}-${month}`;
 }
 
+function resolvePeriodArg(yearOrPeriod, month, timeZone) {
+    if (yearOrPeriod && typeof yearOrPeriod === 'object') return yearOrPeriod;
+    if (Number.isFinite(yearOrPeriod) && Number.isFinite(month)) {
+        return { kind: 'month', year: yearOrPeriod, month };
+    }
+    return { kind: 'month', ...getYearMonthInTimezone(timeZone) };
+}
+
 function recordIsInPeriod(record, year, month, timeZone) {
-    if (!record?.date) return false;
-    const expenseDate = new Date(record.date);
-    if (Number.isNaN(expenseDate.getTime())) return false;
-    const { year: rowYear, month: rowMonth } = getYearMonthInTimezone(timeZone, expenseDate);
-    return rowYear === year && rowMonth === month;
+    return dateMatchesPeriod(record?.date, resolvePeriodArg(year, month, timeZone), timeZone);
 }
 
 /** Aggregate expenses for one calendar month. */
@@ -116,40 +124,51 @@ export function buildExpenseComparison(currentTotal, previousTotal) {
 
 export function buildExpenseSummaryFromRecords(
     expenses,
-    { year, month, timeZone, months = DEFAULT_TREND_MONTHS, now = new Date() } = {}
+    { year, month, timeZone, months = DEFAULT_TREND_MONTHS, now = new Date(), period } = {}
 ) {
     const tz = normalizeTimezone(timeZone);
     const resolvedPeriod =
-        Number.isFinite(year) && Number.isFinite(month)
-            ? { year, month }
-            : getYearMonthInTimezone(tz, now);
-    const previousPeriod = shiftSummaryPeriod(resolvedPeriod.year, resolvedPeriod.month, -1);
+        period ||
+        (Number.isFinite(year) && Number.isFinite(month)
+            ? { kind: 'month', year, month }
+            : { kind: 'month', ...getYearMonthInTimezone(tz, now) });
 
-    const current = computePeriodExpensesFromRecords(
-        expenses,
-        resolvedPeriod.year,
-        resolvedPeriod.month,
-        tz
-    );
-    const previous = computePeriodExpensesFromRecords(
-        expenses,
-        previousPeriod.year,
-        previousPeriod.month,
-        tz
-    );
+    const current = computePeriodExpensesFromRecords(expenses, resolvedPeriod, null, tz);
+    const trend = buildExpenseTrendFromRecords(expenses, { months, timeZone: tz, now });
+
+    if (resolvedPeriod.kind === 'all') {
+        return {
+            period: {
+                kind: 'all',
+                label: formatAnalyticsPeriodLabel(resolvedPeriod),
+                timezone: tz,
+            },
+            totals: {
+                totalExpenses: current.totalExpenses,
+            },
+            byCategory: current.byCategory,
+            trend,
+            comparison: null,
+        };
+    }
+
+    const previousPeriod = previousAnalyticsPeriod(resolvedPeriod);
+    const previous = computePeriodExpensesFromRecords(expenses, previousPeriod, null, tz);
 
     return {
         period: {
+            kind: resolvedPeriod.kind,
             year: resolvedPeriod.year,
             month: resolvedPeriod.month,
-            label: formatTrendMonthLabel(resolvedPeriod.year, resolvedPeriod.month),
+            day: resolvedPeriod.day,
+            label: formatAnalyticsPeriodLabel(resolvedPeriod),
             timezone: tz,
         },
         totals: {
             totalExpenses: current.totalExpenses,
         },
         byCategory: current.byCategory,
-        trend: buildExpenseTrendFromRecords(expenses, { months, timeZone: tz, now }),
+        trend,
         comparison: buildExpenseComparison(current.totalExpenses, previous.totalExpenses),
     };
 }
@@ -162,9 +181,9 @@ export async function getExpenseRecordsForUser(userId) {
         .lean();
 }
 
-export async function getExpenseSummaryForUser(userId, { year, month, timeZone, months } = {}) {
+export async function getExpenseSummaryForUser(userId, { year, month, timeZone, months, period } = {}) {
     const expenses = await getExpenseRecordsForUser(userId);
-    return buildExpenseSummaryFromRecords(expenses, { year, month, timeZone, months });
+    return buildExpenseSummaryFromRecords(expenses, { year, month, timeZone, months, period });
 }
 
 /** Merge expense totals into an existing profit summary payload. */
@@ -209,15 +228,17 @@ export function mergeExpensesIntoProfitSummary(
         };
     });
 
-    profitSummary.comparison = {
-        ...profitSummary.comparison,
-        totalExpenses: computeMoneyPercentChange(totalExpenses, previousExpenseAmount),
-        netProfit: computeMoneyPercentChange(netProfit, previousNetProfit),
-        netMarginPercent: computeMoneyPercentChange(
-            profitSummary.totals.netMarginPercent,
-            previousNetMarginPercent
-        ),
-    };
+    if (profitSummary.comparison) {
+        profitSummary.comparison = {
+            ...profitSummary.comparison,
+            totalExpenses: computeMoneyPercentChange(totalExpenses, previousExpenseAmount),
+            netProfit: computeMoneyPercentChange(netProfit, previousNetProfit),
+            netMarginPercent: computeMoneyPercentChange(
+                profitSummary.totals.netMarginPercent,
+                previousNetMarginPercent
+            ),
+        };
+    }
 
     return profitSummary;
 }

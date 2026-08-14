@@ -12,6 +12,7 @@ import {
     computePercentChange,
     formatTrendMonthLabel,
     shiftSummaryPeriod,
+    buildPeriodSummaryFromDocs,
 } from '../utils/dashboardAnalytics.js';
 
 test('shiftSummaryPeriod moves across year boundary', () => {
@@ -329,4 +330,63 @@ test('computePercentChange handles zero and near-zero baselines', () => {
         value: 10,
         direction: 'up',
     });
+});
+
+test('buildPeriodSummaryFromDocs omits comparison for all-time', () => {
+    const docs = [
+        {
+            date: '2026-01-10T00:00:00.000Z',
+            status: 'paid',
+            total: 400,
+            amountPaid: 400,
+            documentType: 'invoice',
+        },
+        {
+            date: '2026-02-10T00:00:00.000Z',
+            status: 'paid',
+            total: 600,
+            amountPaid: 600,
+            documentType: 'invoice',
+        },
+    ];
+
+    const summary = buildPeriodSummaryFromDocs(docs, {
+        period: { kind: 'all' },
+        timeZone: 'UTC',
+    });
+
+    assert.equal(summary.period.kind, 'all');
+    assert.equal(summary.period.label, 'All time');
+    assert.equal(summary.current.totalRevenue, 1000);
+    assert.equal(summary.comparison, null);
+});
+
+test('buildPeriodSummaryFromDocs compares today to yesterday', () => {
+    const docs = [
+        {
+            date: '2026-08-14T12:00:00.000Z',
+            status: 'paid',
+            total: 12000,
+            amountPaid: 12000,
+            documentType: 'invoice',
+        },
+        {
+            date: '2026-08-13T12:00:00.000Z',
+            status: 'paid',
+            total: 6000,
+            amountPaid: 6000,
+            documentType: 'invoice',
+        },
+    ];
+
+    const summary = buildPeriodSummaryFromDocs(docs, {
+        period: { kind: 'day', year: 2026, month: 8, day: 14 },
+        timeZone: 'UTC',
+    });
+
+    assert.equal(summary.period.kind, 'day');
+    assert.equal(summary.period.label, 'Today');
+    assert.equal(summary.current.totalRevenue, 12000);
+    assert.equal(summary.previous.totalRevenue, 6000);
+    assert.equal(summary.comparison.totalRevenue.direction, 'up');
 });

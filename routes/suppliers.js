@@ -17,8 +17,7 @@ import {
     isSummaryOnlyRequest,
     shouldFetchListSummary,
 } from '../utils/listSummary.js';
-import { parseListMonthQuery } from '../utils/listMonthFilter.js';
-import { getBusinessTimezone, getUtcRangeForMonthInTimezone } from '../utils/timezone.js';
+import { getListPeriodMongoFilter } from '../utils/listMonthFilter.js';
 import { getSupplierActivity } from '../utils/supplierActivity.js';
 
 const router = express.Router();
@@ -44,16 +43,8 @@ router.get('/', auth, asyncHandler(async (req, res) => {
     ]);
     if (searchFilter) Object.assign(filter, searchFilter);
 
-    const listMonth = parseListMonthQuery(req.query);
-    if (listMonth) {
-        const timeZone = await getBusinessTimezone(userId);
-        const { start, end } = getUtcRangeForMonthInTimezone(
-            listMonth.year,
-            listMonth.month,
-            timeZone
-        );
-        filter.createdAt = { $gte: start, $lt: end };
-    }
+    const dateFilter = await getListPeriodMongoFilter(req.query, userId, { dateField: 'createdAt' });
+    if (dateFilter) Object.assign(filter, dateFilter);
 
     const includeSummary = shouldFetchListSummary(req.query);
     const summaryOpts = includeSummary ? await resolveListSummaryOptions(req, userId) : null;

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
     computePeriodExpensesFromRecords,
     mergeExpensesIntoProfitSummary,
+    buildExpenseSummaryFromRecords,
 } from '../utils/expenseAnalytics.js';
 import { buildProfitSummaryFromDocs } from '../utils/profitAnalytics.js';
 
@@ -75,4 +76,35 @@ test('mergeExpensesIntoProfitSummary handles zero expenses', () => {
 
     assert.equal(merged.totals.netProfit, 0);
     assert.equal(merged.totals.totalExpenses, 0);
+});
+
+test('buildExpenseSummaryFromRecords omits comparison for all-time', () => {
+    const expenses = [
+        { date: '2026-07-05', amount: 200, category: 'rent' },
+        { date: '2026-08-05', amount: 1000, category: 'rent' },
+    ];
+
+    const summary = buildExpenseSummaryFromRecords(expenses, {
+        period: { kind: 'all' },
+        timeZone: 'Africa/Lagos',
+    });
+
+    assert.equal(summary.period.kind, 'all');
+    assert.equal(summary.totals.totalExpenses, 1200);
+    assert.equal(summary.comparison, null);
+});
+
+test('buildExpenseSummaryFromRecords compares today to yesterday', () => {
+    const expenses = [
+        { date: '2026-08-14', amount: 12000, category: 'rent' },
+        { date: '2026-08-13', amount: 6000, category: 'transport' },
+    ];
+
+    const summary = buildExpenseSummaryFromRecords(expenses, {
+        period: { kind: 'day', year: 2026, month: 8, day: 14 },
+        timeZone: 'Africa/Lagos',
+    });
+
+    assert.equal(summary.totals.totalExpenses, 12000);
+    assert.equal(summary.comparison.totalExpenses.direction, 'up');
 });

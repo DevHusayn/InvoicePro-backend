@@ -3,17 +3,16 @@ import auth from '../middleware/auth.js';
 import asyncHandler from '../middleware/asyncHandler.js';
 import { getFullDashboardForUser, invalidateDashboardCache } from '../utils/dashboardStats.js';
 import { getPeriodSummaryWithComparison } from '../utils/dashboardAnalytics.js';
-import { getBusinessTimezone, parseSummaryPeriodQuery } from '../utils/timezone.js';
+import { getBusinessTimezone, resolveAnalyticsPeriod } from '../utils/timezone.js';
 
 const router = express.Router();
 
 /** Period summary with month-over-month comparison for dashboard stat cards. */
 router.get('/period-summary', auth, asyncHandler(async (req, res) => {
     const timeZone = await getBusinessTimezone(req.user.userId);
-    const { year, month } = parseSummaryPeriodQuery(req.query, timeZone);
+    const period = resolveAnalyticsPeriod(req.query, timeZone);
     const summary = await getPeriodSummaryWithComparison(req.user.userId, {
-        year,
-        month,
+        period,
         timeZone,
     });
     res.json(summary);
@@ -21,10 +20,7 @@ router.get('/period-summary', auth, asyncHandler(async (req, res) => {
 
 /** Aggregated dashboard — stats, recent docs, alerts, subscription, business info in one response. */
 router.get('/', auth, asyncHandler(async (req, res) => {
-    const dashboard = await getFullDashboardForUser(req.user.userId, {
-        summaryYear: req.query.summaryYear,
-        summaryMonth: req.query.summaryMonth,
-    });
+    const dashboard = await getFullDashboardForUser(req.user.userId, req.query);
     res.json(dashboard);
 }));
 

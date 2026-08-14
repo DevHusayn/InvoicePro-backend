@@ -19,9 +19,12 @@ export function buildListExportFilename(companyName, resource, query = {}) {
     ];
 
     const filterParts = [];
+    const period = String(query.period || '').trim().toLowerCase();
     const year = query.year != null && query.year !== '' ? Number(query.year) : null;
     const month = query.month != null && query.month !== '' ? Number(query.month) : null;
-    if (Number.isFinite(year) && Number.isFinite(month)) {
+    if (period === 'today') {
+        filterParts.push('today');
+    } else if (Number.isFinite(year) && Number.isFinite(month)) {
         filterParts.push(`${year}-${String(month).padStart(2, '0')}`);
     }
     const status = String(query.status || 'all').trim().toLowerCase();

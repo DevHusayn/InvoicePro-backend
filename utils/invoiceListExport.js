@@ -1,7 +1,7 @@
 import Invoice from '../models/Invoice.js';
 import Client from '../models/Client.js';
 import { INVOICE_ONLY_FILTER } from './invoiceDocumentFilter.js';
-import { parseListMonthQuery, buildIssueDateMonthFilter } from './listMonthFilter.js';
+import { getListPeriodMongoFilter } from './listMonthFilter.js';
 import { buildSearchFilter, escapeRegex } from './pagination.js';
 import { getInvoiceAmountPaid, getInvoiceBalanceDue } from './invoicePayments.js';
 import { attachClientNamesToDocuments } from './attachClientNames.js';
@@ -38,8 +38,7 @@ async function resolveInvoiceSearchClientIds(userId, search) {
 export async function buildInvoiceListFilter(userId, query = {}) {
     const status = String(query.status || 'all').trim().toLowerCase();
     const search = String(query.search || '').trim();
-    const listMonth = parseListMonthQuery(query);
-    const dateFilter = listMonth ? buildIssueDateMonthFilter(listMonth.year, listMonth.month) : null;
+    const dateFilter = await getListPeriodMongoFilter(query, userId);
 
     const filter = { userId, status: { $ne: 'draft' }, ...INVOICE_ONLY_FILTER };
     if (status && status !== 'all') {

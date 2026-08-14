@@ -2,7 +2,7 @@ import mongoose from 'mongoose';
 import Invoice from '../models/Invoice.js';
 import { INVOICE_ONLY_FILTER } from './invoiceDocumentFilter.js';
 import { computePaidRevenue, computePendingBalance } from './dashboardStats.js';
-import { getYearMonthInTimezone, normalizeTimezone } from './timezone.js';
+import { getYearMonthInTimezone, normalizeTimezone, dateMatchesPeriod, previousAnalyticsPeriod, formatAnalyticsPeriodLabel } from './timezone.js';
 import { isPartialReceiptDoc } from './receiptValidation.js';
 import { getReceiptPaymentStatusCounts } from './receiptCounts.js';
 
@@ -138,12 +138,16 @@ export function computeCountPercentChange(current, previous) {
     return computePercentChange(current, previous, { minBaseline: 0 });
 }
 
+function resolvePeriodArg(yearOrPeriod, month, timeZone) {
+    if (yearOrPeriod && typeof yearOrPeriod === 'object') return yearOrPeriod;
+    if (Number.isFinite(yearOrPeriod) && Number.isFinite(month)) {
+        return { kind: 'month', year: yearOrPeriod, month };
+    }
+    return { kind: 'month', ...getYearMonthInTimezone(timeZone) };
+}
+
 function docIsInPeriod(doc, year, month, timeZone) {
-    if (!doc?.date) return false;
-    const issueDate = new Date(doc.date);
-    if (Number.isNaN(issueDate.getTime())) return false;
-    const { year: docYear, month: docMonth } = getYearMonthInTimezone(timeZone, issueDate);
-    return docYear === year && docMonth === month;
+    return dateMatchesPeriod(doc?.date, resolvePeriodArg(year, month, timeZone), timeZone);
 }
 
 function isInvoiceDoc(doc) {
@@ -278,38 +282,46 @@ export function buildDashboardAnalyticsFromDocs(docs, { timeZone, months = DEFAU
     };
 }
 
-export function buildPeriodSummaryFromDocs(docs, { year, month, timeZone } = {}) {
+export function buildPeriodSummaryFromDocs(docs, { year, month, timeZone, period } = {}) {
     const tz = normalizeTimezone(timeZone);
     const resolvedPeriod =
-        Number.isFinite(year) && Number.isFinite(month)
-            ? { year, month }
-            : getYearMonthInTimezone(tz);
-    const previousPeriod = shiftSummaryPeriod(resolvedPeriod.year, resolvedPeriod.month, -1);
+        period ||
+        (Number.isFinite(year) && Number.isFinite(month)
+            ? { kind: 'month', year, month }
+            : { kind: 'month', ...getYearMonthInTimezone(tz) });
 
-    const current = computePeriodSummaryFromDocs(
-        docs,
-        resolvedPeriod.year,
-        resolvedPeriod.month,
-        tz
-    );
-    const previous = computePeriodSummaryFromDocs(
-        docs,
-        previousPeriod.year,
-        previousPeriod.month,
-        tz
-    );
+    const current = computePeriodSummaryFromDocs(docs, resolvedPeriod, null, tz);
     const paymentBreakdown = computePeriodPaymentBreakdownFromDocs(
         docs,
-        resolvedPeriod.year,
-        resolvedPeriod.month,
+        resolvedPeriod,
+        null,
         tz
     );
+
+    if (resolvedPeriod.kind === 'all') {
+        return {
+            period: {
+                kind: 'all',
+                label: formatAnalyticsPeriodLabel(resolvedPeriod),
+                timezone: tz,
+            },
+            current,
+            previous: null,
+            paymentBreakdown,
+            comparison: null,
+        };
+    }
+
+    const previousPeriod = previousAnalyticsPeriod(resolvedPeriod);
+    const previous = computePeriodSummaryFromDocs(docs, previousPeriod, null, tz);
 
     return {
         period: {
+            kind: resolvedPeriod.kind,
             year: resolvedPeriod.year,
             month: resolvedPeriod.month,
-            label: formatTrendMonthLabel(resolvedPeriod.year, resolvedPeriod.month),
+            day: resolvedPeriod.day,
+            label: formatAnalyticsPeriodLabel(resolvedPeriod),
             timezone: tz,
         },
         current,
@@ -319,13 +331,13 @@ export function buildPeriodSummaryFromDocs(docs, { year, month, timeZone } = {})
     };
 }
 
-export async function getPeriodSummaryWithComparison(userId, { year, month, timeZone } = {}) {
+export async function getPeriodSummaryWithComparison(userId, { year, month, timeZone, period } = {}) {
     const uid = toUserObjectId(userId);
     const docs = await Invoice.find({ userId: uid, status: { $ne: 'draft' } })
         .select('date status total amountPaid documentType')
         .lean();
 
-    return buildPeriodSummaryFromDocs(docs, { year, month, timeZone });
+    return buildPeriodSummaryFromDocs(docs, { year, month, timeZone, period });
 }
 
 export async function getInvoiceStatusCounts(userId, extraMatch = {}) {

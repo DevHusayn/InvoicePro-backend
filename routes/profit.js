@@ -2,7 +2,7 @@ import express from 'express';
 import auth from '../middleware/auth.js';
 import asyncHandler from '../middleware/asyncHandler.js';
 import { getProfitSummaryForUser } from '../utils/profitAnalytics.js';
-import { getBusinessTimezone, parseSummaryPeriodQuery } from '../utils/timezone.js';
+import { getBusinessTimezone, resolveAnalyticsPeriod } from '../utils/timezone.js';
 import BusinessInfo from '../models/CompanyInfo.js';
 import { isPremiumActive } from '../utils/businessInfoHelpers.js';
 
@@ -20,8 +20,8 @@ router.get('/summary', auth, asyncHandler(async (req, res) => {
     }
 
     const timeZone = await getBusinessTimezone(userId);
-    const { year, month } = parseSummaryPeriodQuery(req.query, timeZone);
-    const summary = await getProfitSummaryForUser(userId, { year, month, timeZone });
+    const period = resolveAnalyticsPeriod(req.query, timeZone);
+    const summary = await getProfitSummaryForUser(userId, { period, timeZone });
     res.json(summary);
 }));
 

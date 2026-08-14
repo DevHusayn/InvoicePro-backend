@@ -1,7 +1,7 @@
 import Invoice from '../models/Invoice.js';
 import Client from '../models/Client.js';
 import { RECEIPT_ONLY_FILTER } from './invoiceDocumentFilter.js';
-import { parseListMonthQuery, buildIssueDateMonthFilter } from './listMonthFilter.js';
+import { getListPeriodMongoFilter } from './listMonthFilter.js';
 import { buildSearchFilter, escapeRegex } from './pagination.js';
 import {
     buildReceiptPartialFilter,
@@ -69,8 +69,7 @@ async function mergeReceiptSearchFilter(filter, userId, search) {
 export async function buildReceiptListFilter(userId, query = {}) {
     const paymentStatus = String(query.status || 'all').trim().toLowerCase();
     const search = String(query.search || '').trim();
-    const listMonth = parseListMonthQuery(query);
-    const dateFilter = listMonth ? buildIssueDateMonthFilter(listMonth.year, listMonth.month) : null;
+    const dateFilter = await getListPeriodMongoFilter(query, userId);
 
     let filter = { userId, ...RECEIPT_LIST_BASE };
     if (dateFilter) {

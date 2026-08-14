@@ -15,12 +15,16 @@ import {
     buildPeriodSummaryFromDocs,
     computeMoneyPercentChange,
     computeRevenueStatsFromDocs,
-    shiftSummaryPeriod,
 } from './dashboardAnalytics.js';
 import { computePeriodProfitFromDocs } from './profitAnalytics.js';
 import { getExpenseRecordsForUser, computePeriodExpensesFromRecords } from './expenseAnalytics.js';
 import { loadProductCostMap } from './productCostResolver.js';
-import { getBusinessTimezone, parseSummaryPeriodQuery } from './timezone.js';
+import {
+    getBusinessTimezone,
+    periodCacheKey,
+    previousAnalyticsPeriod,
+    resolveAnalyticsPeriod,
+} from './timezone.js';
 
 const DASHBOARD_CACHE_TTL_MS = 30_000;
 const OVERDUE_LIMIT = 20;
@@ -114,7 +118,7 @@ async function attachClientNames(docs) {
 }
 
 /** Core dashboard payload — stats, recent documents, overdue alerts. */
-export async function getDashboardForUser(userId, { summaryYear, summaryMonth } = {}) {
+export async function getDashboardForUser(userId, { summaryYear, summaryMonth, period } = {}) {
     const uid = toUserObjectId(userId);
     const nonDraftFilter = { userId: uid, status: { $ne: 'draft' } };
 
@@ -182,47 +186,44 @@ export async function getDashboardForUser(userId, { summaryYear, summaryMonth } 
 
     const revenueStats = computeRevenueStatsFromDocs(analyticsDocs);
     const analytics = buildDashboardAnalyticsFromDocs(analyticsDocs, { timeZone });
+    const resolvedPeriod =
+        period ||
+        resolveAnalyticsPeriod({ summaryYear, summaryMonth }, timeZone);
     const periodSummary = buildPeriodSummaryFromDocs(analyticsDocs, {
-        year: summaryYear,
-        month: summaryMonth,
+        period: resolvedPeriod,
         timeZone,
     });
 
     const productCostById = await loadProductCostMap(userId, analyticsDocs);
 
-    const resolvedPeriod = parseSummaryPeriodQuery(
-        { summaryYear, summaryMonth },
-        timeZone
-    );
-    const previousPeriod = shiftSummaryPeriod(resolvedPeriod.year, resolvedPeriod.month, -1);
     const currentProfit = computePeriodProfitFromDocs(
         analyticsDocs,
-        resolvedPeriod.year,
-        resolvedPeriod.month,
+        resolvedPeriod,
+        null,
         timeZone,
         productCostById
     );
-    const previousProfit = computePeriodProfitFromDocs(
-        analyticsDocs,
-        previousPeriod.year,
-        previousPeriod.month,
-        timeZone,
-        productCostById
-    );
+    const previousPeriod = previousAnalyticsPeriod(resolvedPeriod);
+    const previousProfit = previousPeriod
+        ? computePeriodProfitFromDocs(
+              analyticsDocs,
+              previousPeriod,
+              null,
+              timeZone,
+              productCostById
+          )
+        : { totals: { grossProfit: 0 } };
 
     const expenses = await getExpenseRecordsForUser(userId);
     const currentExpenseTotals = computePeriodExpensesFromRecords(
         expenses,
-        resolvedPeriod.year,
-        resolvedPeriod.month,
+        resolvedPeriod,
+        null,
         timeZone
     );
-    const previousExpenseTotals = computePeriodExpensesFromRecords(
-        expenses,
-        previousPeriod.year,
-        previousPeriod.month,
-        timeZone
-    );
+    const previousExpenseTotals = previousPeriod
+        ? computePeriodExpensesFromRecords(expenses, previousPeriod, null, timeZone)
+        : { totalExpenses: 0 };
     const netProfit = roundMoney(
         currentProfit.totals.grossProfit - currentExpenseTotals.totalExpenses
     );
@@ -239,18 +240,21 @@ export async function getDashboardForUser(userId, { summaryYear, summaryMonth } 
             totalExpenses: currentExpenseTotals.totalExpenses,
             netProfit,
         },
-        comparison: {
-            ...periodSummary.comparison,
-            grossProfit: computeMoneyPercentChange(
-                currentProfit.totals.grossProfit,
-                previousProfit.totals.grossProfit
-            ),
-            totalExpenses: computeMoneyPercentChange(
-                currentExpenseTotals.totalExpenses,
-                previousExpenseTotals.totalExpenses
-            ),
-            netProfit: computeMoneyPercentChange(netProfit, previousNetProfit),
-        },
+        comparison:
+            resolvedPeriod.kind === 'all'
+                ? null
+                : {
+                      ...periodSummary.comparison,
+                      grossProfit: computeMoneyPercentChange(
+                          currentProfit.totals.grossProfit,
+                          previousProfit.totals.grossProfit
+                      ),
+                      totalExpenses: computeMoneyPercentChange(
+                          currentExpenseTotals.totalExpenses,
+                          previousExpenseTotals.totalExpenses
+                      ),
+                      netProfit: computeMoneyPercentChange(netProfit, previousNetProfit),
+                  },
     };
 
     const [recentDocuments, overdueInvoices] = await Promise.all([
@@ -279,23 +283,17 @@ export async function getDashboardForUser(userId, { summaryYear, summaryMonth } 
 }
 
 /** Full aggregated dashboard with subscription and business info. */
-export async function getFullDashboardForUser(userId, { summaryYear, summaryMonth } = {}) {
+export async function getFullDashboardForUser(userId, query = {}) {
     const timeZone = await getBusinessTimezone(userId);
-    const resolvedPeriod = parseSummaryPeriodQuery(
-        { summaryYear, summaryMonth },
-        timeZone
-    );
-    const cacheKey = `${userId}:${resolvedPeriod.year}:${resolvedPeriod.month}`;
+    const resolvedPeriod = resolveAnalyticsPeriod(query, timeZone);
+    const cacheKey = `${userId}:${periodCacheKey(resolvedPeriod)}`;
     const cached = getCache('dashboard', cacheKey);
     if (cached) return cached;
 
     const uid = toUserObjectId(userId);
 
     const [dashboard, invoiceUsage, businessDoc] = await Promise.all([
-        getDashboardForUser(userId, {
-            summaryYear: resolvedPeriod.year,
-            summaryMonth: resolvedPeriod.month,
-        }),
+        getDashboardForUser(userId, { period: resolvedPeriod }),
         getInvoiceUsageForUser(userId),
         BusinessInfo.findOne({ userId: uid }).lean(),
     ]);

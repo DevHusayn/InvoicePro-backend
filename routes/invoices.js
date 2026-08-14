@@ -61,7 +61,7 @@ import {
 import { INVOICE_ONLY_FILTER } from '../utils/invoiceDocumentFilter.js';
 import { countListSummary, buildSummaryResponse, resolveListSummaryOptions, isSummaryOnlyRequest, shouldFetchListSummary } from '../utils/listSummary.js';
 import { getInvoiceStatusCounts } from '../utils/dashboardAnalytics.js';
-import { parseListMonthQuery, buildIssueDateMonthFilter } from '../utils/listMonthFilter.js';
+import { getListPeriodMongoFilter } from '../utils/listMonthFilter.js';
 import { sendInvoiceListExport } from '../utils/invoiceListExport.js';
 import {
     applyInventoryTransition,
@@ -185,17 +185,12 @@ router.get('/', auth, asyncHandler(async (req, res) => {
     const sortKey = String(req.query.sort || 'newest').trim();
     const sort = INVOICE_SORT[sortKey] || INVOICE_SORT.newest;
     const search = String(req.query.search || '').trim();
-    const listMonth = parseListMonthQuery(req.query);
-    const dateFilter = listMonth ? buildIssueDateMonthFilter(listMonth.year, listMonth.month) : null;
-
     const filter = { userId, status: { $ne: 'draft' }, ...INVOICE_ONLY_FILTER };
     if (status && status !== 'all') {
         filter.status = status;
     }
-
-    if (dateFilter) {
-        Object.assign(filter, dateFilter);
-    }
+    const dateFilter = await getListPeriodMongoFilter(req.query, userId);
+    if (dateFilter) Object.assign(filter, dateFilter);
 
     if (search) {
         const clientIds = await resolveInvoiceSearchClientIds(userId, search);

@@ -13,16 +13,16 @@ import {
     buildPaginationMeta,
     buildSearchFilter,
 } from '../utils/pagination.js';
-import { parseListMonthQuery, buildIssueDateMonthFilter } from '../utils/listMonthFilter.js';
-import { getBusinessTimezone, parseSummaryPeriodQuery } from '../utils/timezone.js';
+import { getListPeriodMongoFilter } from '../utils/listMonthFilter.js';
+import { getBusinessTimezone, resolveAnalyticsPeriod } from '../utils/timezone.js';
 import { getExpenseSummaryForUser } from '../utils/expenseAnalytics.js';
 
 const router = express.Router();
 
 router.get('/summary', auth, asyncHandler(async (req, res) => {
     const timeZone = await getBusinessTimezone(req.user.userId);
-    const { year, month } = parseSummaryPeriodQuery(req.query, timeZone);
-    const summary = await getExpenseSummaryForUser(req.user.userId, { year, month, timeZone });
+    const period = resolveAnalyticsPeriod(req.query, timeZone);
+    const summary = await getExpenseSummaryForUser(req.user.userId, { period, timeZone });
     res.json(summary);
 }));
 
@@ -33,8 +33,7 @@ router.get('/', auth, asyncHandler(async (req, res) => {
     const searchFilter = buildSearchFilter(req.query.search, ['description', 'vendor']);
     if (searchFilter) Object.assign(filter, searchFilter);
 
-    const listMonth = parseListMonthQuery(req.query);
-    const dateFilter = listMonth ? buildIssueDateMonthFilter(listMonth.year, listMonth.month) : null;
+    const dateFilter = await getListPeriodMongoFilter(req.query, userId);
     if (dateFilter) Object.assign(filter, dateFilter);
 
     const { data, total } = await paginateFind(Expense, filter, {

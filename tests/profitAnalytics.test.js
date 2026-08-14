@@ -4,6 +4,7 @@ import {
     computeDocumentProfit,
     computePeriodProfitFromDocs,
     buildProfitTrendFromDocs,
+    buildProfitSummaryFromDocs,
 } from '../utils/profitAnalytics.js';
 import { computeWeightedAverageCost } from '../utils/itemCostSnapshot.js';
 
@@ -174,4 +175,63 @@ test('buildProfitTrendFromDocs fills monthly gross profit buckets', () => {
 
     assert.equal(trend.length, 2);
     assert.equal(trend[1].grossProfit, 150);
+});
+
+test('buildProfitSummaryFromDocs omits comparison for all-time', () => {
+    const docs = [
+        {
+            date: '2026-01-10T00:00:00.000Z',
+            status: 'paid',
+            total: 400,
+            amountPaid: 400,
+            discount: 0,
+            items: [{ productId: 'p1', quantity: 1, rate: 400, unitCost: 100 }],
+        },
+        {
+            date: '2026-02-10T00:00:00.000Z',
+            status: 'paid',
+            total: 600,
+            amountPaid: 600,
+            discount: 0,
+            items: [{ productId: 'p1', quantity: 1, rate: 600, unitCost: 200 }],
+        },
+    ];
+
+    const summary = buildProfitSummaryFromDocs(docs, {
+        period: { kind: 'all' },
+        timeZone: 'UTC',
+    });
+
+    assert.equal(summary.period.kind, 'all');
+    assert.equal(summary.totals.grossProfit, 700);
+    assert.equal(summary.comparison, null);
+});
+
+test('buildProfitSummaryFromDocs compares today to yesterday', () => {
+    const docs = [
+        {
+            date: '2026-08-14T12:00:00.000Z',
+            status: 'paid',
+            total: 12000,
+            amountPaid: 12000,
+            discount: 0,
+            items: [{ productId: 'p1', quantity: 1, rate: 12000, unitCost: 2000 }],
+        },
+        {
+            date: '2026-08-13T12:00:00.000Z',
+            status: 'paid',
+            total: 6000,
+            amountPaid: 6000,
+            discount: 0,
+            items: [{ productId: 'p1', quantity: 1, rate: 6000, unitCost: 1000 }],
+        },
+    ];
+
+    const summary = buildProfitSummaryFromDocs(docs, {
+        period: { kind: 'day', year: 2026, month: 8, day: 14 },
+        timeZone: 'UTC',
+    });
+
+    assert.equal(summary.totals.grossProfit, 10000);
+    assert.equal(summary.comparison.grossProfit.direction, 'up');
 });

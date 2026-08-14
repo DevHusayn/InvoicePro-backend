@@ -162,13 +162,18 @@ export function applyReceiptPaymentLedger(doc, { amount } = {}) {
     return doc;
 }
 
+function parseReceiptMoney(raw) {
+    if (typeof raw === 'number') return roundMoney(raw);
+    return roundMoney(String(raw).replace(/,/g, '').trim());
+}
+
 export function resolveReceiptPaymentAmount(body, docTotal) {
     if (body?.paidInFull === false || body?.paidInFull === 'false') {
         const raw = body.paymentAmount ?? body.amountPaid;
         if (raw === undefined || raw === null || raw === '') {
             throw validationError('Enter the amount received.');
         }
-        return roundMoney(raw);
+        return parseReceiptMoney(raw);
     }
     return roundMoney(docTotal);
 }

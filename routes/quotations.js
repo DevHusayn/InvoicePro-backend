@@ -44,7 +44,7 @@ import {
     escapeRegex,
 } from '../utils/pagination.js';
 import { countListSummary, buildSummaryResponse, resolveListSummaryOptions, isSummaryOnlyRequest, shouldFetchListSummary } from '../utils/listSummary.js';
-import { parseListMonthQuery, buildIssueDateMonthFilter } from '../utils/listMonthFilter.js';
+import { getListPeriodMongoFilter } from '../utils/listMonthFilter.js';
 import { sendQuotationListExport } from '../utils/quotationListExport.js';
 
 const router = express.Router();
@@ -169,8 +169,7 @@ router.get('/', auth, asyncHandler(async (req, res) => {
     const sortKey = String(req.query.sort || 'newest').trim();
     const sort = QUOTATION_SORT[sortKey] || QUOTATION_SORT.newest;
     const search = String(req.query.search || '').trim();
-    const listMonth = parseListMonthQuery(req.query);
-    const dateFilter = listMonth ? buildIssueDateMonthFilter(listMonth.year, listMonth.month) : null;
+    const dateFilter = await getListPeriodMongoFilter(req.query, userId);
 
     const filter = { userId, status: { $ne: 'draft' } };
     if (status && status !== 'all') {

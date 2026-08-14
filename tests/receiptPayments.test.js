@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { applyReceiptPayment } from '../utils/receiptValidation.js';
+import {
+    applyReceiptPayment,
+    resolveReceiptPaymentAmount,
+} from '../utils/receiptValidation.js';
 import { getInvoiceBalanceDue } from '../utils/invoicePayments.js';
 
 test('applyReceiptPayment records follow-up installment on partial receipt', () => {
@@ -88,4 +91,16 @@ test('applyReceiptPayment rejects when already fully paid', () => {
             }),
         (err) => err.message.includes('fully paid')
     );
+});
+
+test('resolveReceiptPaymentAmount uses partial amount, including comma-formatted strings', () => {
+    assert.equal(
+        resolveReceiptPaymentAmount({ paidInFull: false, paymentAmount: 25000 }, 50000),
+        25000
+    );
+    assert.equal(
+        resolveReceiptPaymentAmount({ paidInFull: false, paymentAmount: '25,000' }, 50000),
+        25000
+    );
+    assert.equal(resolveReceiptPaymentAmount({ paidInFull: true }, 50000), 50000);
 });

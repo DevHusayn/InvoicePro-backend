@@ -19,7 +19,7 @@ import {
     isSummaryOnlyRequest,
     shouldFetchListSummary,
 } from '../utils/listSummary.js';
-import { parseListMonthQuery, buildIssueDateMonthFilter } from '../utils/listMonthFilter.js';
+import { getListPeriodMongoFilter } from '../utils/listMonthFilter.js';
 import { getNextPurchaseOrderNumber } from '../utils/purchaseOrderNumber.js';
 import {
     PO_DRAFT,
@@ -131,8 +131,7 @@ router.get('/', auth, asyncHandler(async (req, res) => {
     const sortKey = String(req.query.sort || 'newest').trim();
     const sort = PO_SORT[sortKey] || PO_SORT.newest;
     const search = String(req.query.search || '').trim();
-    const listMonth = parseListMonthQuery(req.query);
-    const dateFilter = listMonth ? buildIssueDateMonthFilter(listMonth.year, listMonth.month) : null;
+    const dateFilter = await getListPeriodMongoFilter(req.query, userId);
 
     const filter = { userId, status: { $ne: PO_DRAFT } };
     if (status && status !== 'all') {

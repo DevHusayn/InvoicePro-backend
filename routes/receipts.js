@@ -23,7 +23,7 @@ import {
     buildReceiptFullFilter,
 } from '../utils/receiptValidation.js';
 import { getReceiptPaymentStatusCounts } from '../utils/receiptCounts.js';
-import { parseListMonthQuery, buildIssueDateMonthFilter } from '../utils/listMonthFilter.js';
+import { getListPeriodMongoFilter } from '../utils/listMonthFilter.js';
 import { RECEIPT_ONLY_FILTER } from '../utils/invoiceDocumentFilter.js';
 import { attachPublicTokenIfNeeded } from '../utils/invoicePublicToken.js';
 import {
@@ -177,8 +177,7 @@ router.get('/', auth, asyncHandler(async (req, res) => {
     const sort = RECEIPT_SORT[sortKey] || RECEIPT_SORT.newest;
     const search = String(req.query.search || '').trim();
     const paymentStatus = String(req.query.status || 'all').trim().toLowerCase();
-    const listMonth = parseListMonthQuery(req.query);
-    const dateFilter = listMonth ? buildIssueDateMonthFilter(listMonth.year, listMonth.month) : null;
+    const dateFilter = await getListPeriodMongoFilter(req.query, userId);
 
     let filter = { userId, ...RECEIPT_LIST_BASE };
 

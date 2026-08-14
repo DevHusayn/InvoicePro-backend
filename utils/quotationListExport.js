@@ -1,6 +1,6 @@
 import Quotation from '../models/Quotation.js';
 import Client from '../models/Client.js';
-import { parseListMonthQuery, buildIssueDateMonthFilter } from './listMonthFilter.js';
+import { getListPeriodMongoFilter } from './listMonthFilter.js';
 import { buildSearchFilter, escapeRegex } from './pagination.js';
 import { syncExpiredQuotationsForUser } from './quotationExpire.js';
 import { attachClientNamesToDocuments } from './attachClientNames.js';
@@ -37,8 +37,7 @@ async function resolveSearchClientIds(userId, search) {
 export async function buildQuotationListFilter(userId, query = {}) {
     const status = String(query.status || 'all').trim().toLowerCase();
     const search = String(query.search || '').trim();
-    const listMonth = parseListMonthQuery(query);
-    const dateFilter = listMonth ? buildIssueDateMonthFilter(listMonth.year, listMonth.month) : null;
+    const dateFilter = await getListPeriodMongoFilter(query, userId);
 
     const filter = { userId, status: { $ne: 'draft' } };
     if (status && status !== 'all') {

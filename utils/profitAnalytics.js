@@ -4,10 +4,14 @@ import Product from '../models/Product.js';
 import {
     buildRevenueTrendBuckets,
     computeMoneyPercentChange,
-    formatTrendMonthLabel,
-    shiftSummaryPeriod,
 } from './dashboardAnalytics.js';
-import { getYearMonthInTimezone, normalizeTimezone } from './timezone.js';
+import {
+    dateMatchesPeriod,
+    formatAnalyticsPeriodLabel,
+    getYearMonthInTimezone,
+    normalizeTimezone,
+    previousAnalyticsPeriod,
+} from './timezone.js';
 import { loadProductCostMap, resolveLineUnitCost, lineHasCostData } from './productCostResolver.js';
 import {
     computeDocumentDiscountRatio,
@@ -39,12 +43,16 @@ function bucketKey(year, month) {
     return `${year}-${month}`;
 }
 
+function resolvePeriodArg(yearOrPeriod, month, timeZone) {
+    if (yearOrPeriod && typeof yearOrPeriod === 'object') return yearOrPeriod;
+    if (Number.isFinite(yearOrPeriod) && Number.isFinite(month)) {
+        return { kind: 'month', year: yearOrPeriod, month };
+    }
+    return { kind: 'month', ...getYearMonthInTimezone(timeZone) };
+}
+
 function docIsInPeriod(doc, year, month, timeZone) {
-    if (!doc?.date) return false;
-    const issueDate = new Date(doc.date);
-    if (Number.isNaN(issueDate.getTime())) return false;
-    const { year: docYear, month: docMonth } = getYearMonthInTimezone(timeZone, issueDate);
-    return docYear === year && docMonth === month;
+    return dateMatchesPeriod(doc?.date, resolvePeriodArg(year, month, timeZone), timeZone);
 }
 
 /**
@@ -268,45 +276,55 @@ export function buildProfitComparison(currentTotals, previousTotals) {
 
 export function buildProfitSummaryFromDocs(
     docs,
-    { year, month, timeZone, months = DEFAULT_TREND_MONTHS, now = new Date(), productCostById = null } = {}
+    { year, month, timeZone, months = DEFAULT_TREND_MONTHS, now = new Date(), productCostById = null, period } = {}
 ) {
     const tz = normalizeTimezone(timeZone);
     const resolvedPeriod =
-        Number.isFinite(year) && Number.isFinite(month)
-            ? { year, month }
-            : getYearMonthInTimezone(tz, now);
-    const previousPeriod = shiftSummaryPeriod(resolvedPeriod.year, resolvedPeriod.month, -1);
+        period ||
+        (Number.isFinite(year) && Number.isFinite(month)
+            ? { kind: 'month', year, month }
+            : { kind: 'month', ...getYearMonthInTimezone(tz, now) });
 
-    const current = computePeriodProfitFromDocs(
-        docs,
-        resolvedPeriod.year,
-        resolvedPeriod.month,
-        tz,
-        productCostById
-    );
-    const previous = computePeriodProfitFromDocs(
-        docs,
-        previousPeriod.year,
-        previousPeriod.month,
-        tz,
-        productCostById
-    );
+    const current = computePeriodProfitFromDocs(docs, resolvedPeriod, null, tz, productCostById);
+    const trend = buildProfitTrendFromDocs(docs, { months, timeZone: tz, now, productCostById });
+
+    if (resolvedPeriod.kind === 'all') {
+        return {
+            period: {
+                kind: 'all',
+                label: formatAnalyticsPeriodLabel(resolvedPeriod),
+                timezone: tz,
+            },
+            totals: current.totals,
+            byProduct: current.byProduct,
+            trend,
+            comparison: null,
+        };
+    }
+
+    const previousPeriod = previousAnalyticsPeriod(resolvedPeriod);
+    const previous = computePeriodProfitFromDocs(docs, previousPeriod, null, tz, productCostById);
 
     return {
         period: {
+            kind: resolvedPeriod.kind,
             year: resolvedPeriod.year,
             month: resolvedPeriod.month,
-            label: formatTrendMonthLabel(resolvedPeriod.year, resolvedPeriod.month),
+            day: resolvedPeriod.day,
+            label: formatAnalyticsPeriodLabel(resolvedPeriod),
             timezone: tz,
         },
         totals: current.totals,
         byProduct: current.byProduct,
-        trend: buildProfitTrendFromDocs(docs, { months, timeZone: tz, now, productCostById }),
+        trend,
         comparison: buildProfitComparison(current.totals, previous.totals),
     };
 }
 
-export async function getProfitSummaryForUser(userId, { year, month, timeZone, months = DEFAULT_TREND_MONTHS } = {}) {
+export async function getProfitSummaryForUser(
+    userId,
+    { year, month, timeZone, months = DEFAULT_TREND_MONTHS, period } = {}
+) {
     const uid = toUserObjectId(userId);
     const docs = await Invoice.find({ userId: uid, status: { $ne: 'draft' } })
         .select('date status total amountPaid documentType items discount discountType discountValue')
@@ -333,7 +351,14 @@ export async function getProfitSummaryForUser(userId, { year, month, timeZone, m
 
     const nameById = new Map(products.map((product) => [String(product._id), product.name || 'Product']));
 
-    const summary = buildProfitSummaryFromDocs(docs, { year, month, timeZone, months, productCostById });
+    const summary = buildProfitSummaryFromDocs(docs, {
+        year,
+        month,
+        timeZone,
+        months,
+        productCostById,
+        period,
+    });
     summary.byProduct = summary.byProduct.map((row) => ({
         ...row,
         name: nameById.get(row.productId) || row.name,
@@ -342,31 +367,26 @@ export async function getProfitSummaryForUser(userId, { year, month, timeZone, m
     const expenses = await getExpenseRecordsForUser(userId);
     const tz = normalizeTimezone(timeZone);
     const resolvedPeriod =
-        Number.isFinite(year) && Number.isFinite(month)
-            ? { year, month }
-            : getYearMonthInTimezone(tz);
-    const previousPeriod = shiftSummaryPeriod(resolvedPeriod.year, resolvedPeriod.month, -1);
+        period ||
+        (Number.isFinite(year) && Number.isFinite(month)
+            ? { kind: 'month', year, month }
+            : { kind: 'month', ...getYearMonthInTimezone(tz) });
 
     const currentExpenseTotals = computePeriodExpensesFromRecords(
         expenses,
-        resolvedPeriod.year,
-        resolvedPeriod.month,
+        resolvedPeriod,
+        null,
         tz
     );
-    const previousPeriodProfit = computePeriodProfitFromDocs(
-        docs,
-        previousPeriod.year,
-        previousPeriod.month,
-        tz,
-        productCostById
-    );
+
+    const previousPeriod = previousAnalyticsPeriod(resolvedPeriod);
+    const previousPeriodProfit = previousPeriod
+        ? computePeriodProfitFromDocs(docs, previousPeriod, null, tz, productCostById)
+        : { totals: { grossProfit: 0, revenue: 0 } };
     const previousExpenseTotals = {
-        ...computePeriodExpensesFromRecords(
-            expenses,
-            previousPeriod.year,
-            previousPeriod.month,
-            tz
-        ),
+        ...(previousPeriod
+            ? computePeriodExpensesFromRecords(expenses, previousPeriod, null, tz)
+            : { totalExpenses: 0 }),
         grossProfit: previousPeriodProfit.totals.grossProfit,
         revenue: previousPeriodProfit.totals.revenue,
     };
@@ -376,6 +396,7 @@ export async function getProfitSummaryForUser(userId, { year, month, timeZone, m
         month,
         timeZone: tz,
         months,
+        period: resolvedPeriod,
     });
 
     return mergeExpensesIntoProfitSummary(summary, {

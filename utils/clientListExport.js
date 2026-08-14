@@ -1,7 +1,6 @@
 import Client from '../models/Client.js';
-import { parseListMonthQuery } from './listMonthFilter.js';
+import { getListPeriodMongoFilter } from './listMonthFilter.js';
 import { buildSearchFilter } from './pagination.js';
-import { getBusinessTimezone, getUtcRangeForMonthInTimezone } from './timezone.js';
 import {
     LIST_EXPORT_MAX,
     rowsToCsv,
@@ -16,16 +15,8 @@ export async function buildClientListFilter(userId, query = {}) {
     const searchFilter = buildSearchFilter(query.search, ['name', 'email', 'company', 'phone']);
     if (searchFilter) Object.assign(filter, searchFilter);
 
-    const listMonth = parseListMonthQuery(query);
-    if (listMonth) {
-        const timeZone = await getBusinessTimezone(userId);
-        const { start, end } = getUtcRangeForMonthInTimezone(
-            listMonth.year,
-            listMonth.month,
-            timeZone
-        );
-        filter.createdAt = { $gte: start, $lt: end };
-    }
+    const dateFilter = await getListPeriodMongoFilter(query, userId, { dateField: 'createdAt' });
+    if (dateFilter) Object.assign(filter, dateFilter);
     return filter;
 }
 
