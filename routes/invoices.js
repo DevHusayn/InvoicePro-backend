@@ -16,6 +16,7 @@ import {
     isFinalizingDraft,
     isDraftStatus,
     assertInvoiceDeleteAllowed,
+    stripPremiumDocumentFooter,
 } from '../utils/invoiceValidation.js';
 import {
     applyInvoicePayment,
@@ -70,6 +71,7 @@ import {
     withStockWarnings,
 } from '../utils/inventory.js';
 import { snapshotItemUnitCosts } from '../utils/itemCostSnapshot.js';
+import { isUserPremium } from '../utils/premiumAccess.js';
 
 const router = express.Router();
 
@@ -302,6 +304,7 @@ router.post('/', auth, requireEmailVerified, async (req, res) => {
             reserved = true;
         }
         const normalized = normalizeInvoicePayload(req.body, { isCreate: true });
+        stripPremiumDocumentFooter(normalized, await isUserPremium(req.user.userId));
         const payload = await assignDocumentNumbers(
             normalized,
             null,
@@ -421,6 +424,7 @@ router.put('/:id', auth, requireEmailVerified, validateObjectId(), async (req, r
         }
 
         const normalized = normalizeInvoicePayload(req.body, { existing });
+        stripPremiumDocumentFooter(normalized, await isUserPremium(req.user.userId));
         if (isFinalizingDraft(existing, normalized)) {
             await reserveInvoiceCreation(req.user.userId);
             reserved = true;

@@ -32,6 +32,8 @@ const invoiceSchema = new mongoose.Schema({
         }
     ],
     notes: String,
+    /** Premium: custom thank-you footer on PDF (falls back to default when empty). */
+    documentFooter: String,
     clientAdditionalInfo: String,
     status: { type: String, default: 'pending' },
     paymentMethod: {

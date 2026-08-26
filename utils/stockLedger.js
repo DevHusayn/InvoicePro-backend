@@ -102,9 +102,12 @@ export async function recordInventoryTransitionMovements({
     for (const [productId, delta] of deltas) {
         if (!delta) continue;
 
-        const product = await Product.findOne({ _id: productId, userId, trackInventory: true })
-            .select('quantityOnHand')
-            .lean();
+        let query = Product.findOne({ _id: productId, userId, trackInventory: true })
+            .select('quantityOnHand');
+        if (session) {
+            query = query.session(session);
+        }
+        const product = await query.lean();
 
         if (!product) continue;
 
@@ -130,7 +133,7 @@ export async function getStockHistory(userId, productId, { limit = 50 } = {}) {
         .limit(limit)
         .lean();
 
-    return rows.map((row) => ({
+    const mapped = rows.map((row) => ({
         id: String(row._id),
         delta: row.delta,
         balanceAfter: row.balanceAfter,
@@ -141,4 +144,16 @@ export async function getStockHistory(userId, productId, { limit = 50 } = {}) {
         note: row.note || '',
         date: row.createdAt?.toISOString?.() || null,
     }));
+
+    if (mapped.length === 0) return mapped;
+
+    const chronological = [...mapped].reverse();
+    let running = Number(chronological[0].balanceAfter ?? 0) - Number(chronological[0].delta ?? 0);
+
+    for (const row of chronological) {
+        running += Number(row.delta ?? 0);
+        row.balanceAfter = running;
+    }
+
+    return chronological.reverse();
 }

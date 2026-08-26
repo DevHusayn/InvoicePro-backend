@@ -2,7 +2,7 @@ import mongoose from 'mongoose';
 import Invoice from '../models/Invoice.js';
 import { INVOICE_ONLY_FILTER } from './invoiceDocumentFilter.js';
 import { computePaidRevenue, computePendingBalance } from './dashboardStats.js';
-import { getYearMonthInTimezone, normalizeTimezone, dateMatchesPeriod, previousAnalyticsPeriod, formatAnalyticsPeriodLabel } from './timezone.js';
+import { getYearMonthInTimezone, normalizeTimezone, dateMatchesPeriod, previousAnalyticsPeriod, formatAnalyticsPeriodLabel, getDatePartsInTimezone, toDateInputValue } from './timezone.js';
 import { isPartialReceiptDoc } from './receiptValidation.js';
 import { getReceiptPaymentStatusCounts } from './receiptCounts.js';
 
@@ -189,9 +189,30 @@ export function computePeriodSummaryFromDocs(docs, year, month, timeZone) {
     };
 }
 
-/** Status counts for invoices and receipts issued in a calendar month. */
-export function computePeriodPaymentBreakdownFromDocs(docs, year, month, timeZone) {
+function docDueDateIsInPeriod(doc, year, month, timeZone) {
+    return dateMatchesPeriod(doc?.dueDate, resolvePeriodArg(year, month, timeZone), timeZone);
+}
+
+function todayDateStringInTimezone(timeZone, now = new Date()) {
+    const parts = getDatePartsInTimezone(normalizeTimezone(timeZone), now);
+    return toDateInputValue(parts.year, parts.month, parts.day);
+}
+
+/** Unpaid invoice past due, or explicitly marked overdue. */
+export function isUnpaidOverdueInvoice(doc, todayStr) {
+    if (!isInvoiceDoc(doc)) return false;
+    if (doc.status === 'cancelled' || doc.status === 'draft' || doc.status === 'paid') return false;
+    if (doc.status === 'overdue') return true;
+    if (['pending', 'partial'].includes(doc.status) && doc.dueDate && doc.dueDate < todayStr) {
+        return true;
+    }
+    return false;
+}
+
+/** Status counts for documents issued in period; overdue counts by due date in period. */
+export function computePeriodPaymentBreakdownFromDocs(docs, year, month, timeZone, now = new Date()) {
     const tz = normalizeTimezone(timeZone);
+    const todayStr = todayDateStringInTimezone(tz, now);
     let fullyPaidInvoices = 0;
     let fullyPaidReceipts = 0;
     let partialInvoices = 0;
@@ -213,19 +234,33 @@ export function computePeriodPaymentBreakdownFromDocs(docs, year, month, timeZon
 
         if (!isInvoiceDoc(doc)) continue;
 
-        if (doc.status === 'paid') fullyPaidInvoices += 1;
-        else if (doc.status === 'partial') partialInvoices += 1;
-        else if (doc.status === 'pending') pending += 1;
-        else if (doc.status === 'overdue') overdue += 1;
+        if (doc.status === 'paid') {
+            fullyPaidInvoices += 1;
+        } else if (isUnpaidOverdueInvoice(doc, todayStr)) {
+            continue;
+        } else if (doc.status === 'partial') {
+            partialInvoices += 1;
+        } else if (doc.status === 'pending') {
+            pending += 1;
+        }
     }
 
-    const total =
+    for (const doc of docs) {
+        if (!isInvoiceDoc(doc)) continue;
+        if (doc.status === 'draft' || doc.status === 'cancelled') continue;
+        if (!isUnpaidOverdueInvoice(doc, todayStr)) continue;
+        if (!docDueDateIsInPeriod(doc, year, month, tz)) continue;
+        overdue += 1;
+    }
+
+    const issuedInPeriod =
         fullyPaidInvoices +
         fullyPaidReceipts +
         partialInvoices +
         partialReceipts +
-        pending +
-        overdue;
+        pending;
+
+    const total = issuedInPeriod + overdue;
 
     return {
         partialInvoices,
@@ -234,6 +269,7 @@ export function computePeriodPaymentBreakdownFromDocs(docs, year, month, timeZon
         overdue,
         fullyPaidInvoices,
         fullyPaidReceipts,
+        issuedInPeriod,
         total,
     };
 }
@@ -302,7 +338,7 @@ export function buildPeriodSummaryFromDocs(docs, { year, month, timeZone, period
         return {
             period: {
                 kind: 'all',
-                label: formatAnalyticsPeriodLabel(resolvedPeriod),
+                label: formatAnalyticsPeriodLabel(resolvedPeriod, 'en-US', tz),
                 timezone: tz,
             },
             current,
@@ -321,7 +357,13 @@ export function buildPeriodSummaryFromDocs(docs, { year, month, timeZone, period
             year: resolvedPeriod.year,
             month: resolvedPeriod.month,
             day: resolvedPeriod.day,
-            label: formatAnalyticsPeriodLabel(resolvedPeriod),
+            startYear: resolvedPeriod.startYear,
+            startMonth: resolvedPeriod.startMonth,
+            startDay: resolvedPeriod.startDay,
+            endYear: resolvedPeriod.endYear,
+            endMonth: resolvedPeriod.endMonth,
+            endDay: resolvedPeriod.endDay,
+            label: formatAnalyticsPeriodLabel(resolvedPeriod, 'en-US', tz),
             timezone: tz,
         },
         current,
@@ -334,7 +376,7 @@ export function buildPeriodSummaryFromDocs(docs, { year, month, timeZone, period
 export async function getPeriodSummaryWithComparison(userId, { year, month, timeZone, period } = {}) {
     const uid = toUserObjectId(userId);
     const docs = await Invoice.find({ userId: uid, status: { $ne: 'draft' } })
-        .select('date status total amountPaid documentType')
+        .select('date dueDate status total amountPaid documentType')
         .lean();
 
     return buildPeriodSummaryFromDocs(docs, { year, month, timeZone, period });
@@ -391,7 +433,7 @@ export async function getRevenueTrend(userId, { months = DEFAULT_TREND_MONTHS, t
     const uid = toUserObjectId(userId);
     const tz = normalizeTimezone(timeZone);
     const docs = await Invoice.find({ userId: uid, status: { $ne: 'draft' } })
-        .select('date status total amountPaid documentType')
+        .select('date dueDate status total amountPaid documentType')
         .lean();
 
     return buildRevenueTrendFromDocs(docs, { months, timeZone: tz });

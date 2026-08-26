@@ -31,6 +31,7 @@ const ALLOWED_INVOICE_FIELDS = [
     'dueDate',
     'items',
     'notes',
+    'documentFooter',
     'clientAdditionalInfo',
     'status',
     'paymentMethod',
@@ -121,6 +122,8 @@ export function sanitizeInvoicePayload(body) {
     }
 
     data.notes = data.notes !== undefined ? sanitizePlainText(data.notes, 2000) : undefined;
+    data.documentFooter =
+        data.documentFooter !== undefined ? sanitizePlainText(data.documentFooter, 500) : undefined;
     data.clientAdditionalInfo =
         data.clientAdditionalInfo !== undefined
             ? sanitizePlainText(data.clientAdditionalInfo, 500)
@@ -340,4 +343,11 @@ export async function assignDocumentNumbers(payload, existing, userId, generator
 
 export function isFinalizingDraft(existing, payload) {
     return existing?.status === DRAFT && payload.status === 'pending';
+}
+
+/** Remove custom document footer for non-premium users. */
+export function stripPremiumDocumentFooter(data, premium) {
+    if (!data || premium) return data;
+    delete data.documentFooter;
+    return data;
 }

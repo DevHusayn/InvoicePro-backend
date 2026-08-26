@@ -269,8 +269,50 @@ test('computePeriodPaymentBreakdownFromDocs counts statuses for the selected iss
         overdue: 0,
         fullyPaidInvoices: 1,
         fullyPaidReceipts: 1,
+        issuedInPeriod: 4,
         total: 4,
     });
+});
+
+test('computePeriodPaymentBreakdownFromDocs counts overdue by due date in period, not issue date', () => {
+    const docs = [
+        {
+            date: '2026-07-15T00:00:00.000Z',
+            dueDate: '2026-08-22',
+            status: 'overdue',
+            documentType: 'invoice',
+        },
+        {
+            date: '2026-07-20T00:00:00.000Z',
+            dueDate: '2026-09-05',
+            status: 'overdue',
+            documentType: 'invoice',
+        },
+        {
+            date: '2026-08-10T00:00:00.000Z',
+            dueDate: '2026-08-25',
+            status: 'pending',
+            documentType: 'invoice',
+        },
+        {
+            date: '2026-08-12T00:00:00.000Z',
+            dueDate: '2026-09-10',
+            status: 'pending',
+            documentType: 'invoice',
+        },
+    ];
+
+    const breakdown = computePeriodPaymentBreakdownFromDocs(
+        docs,
+        2026,
+        8,
+        'UTC',
+        new Date('2026-08-26T12:00:00.000Z')
+    );
+
+    assert.equal(breakdown.overdue, 2);
+    assert.equal(breakdown.pending, 1);
+    assert.equal(breakdown.issuedInPeriod, 1);
 });
 
 test('computePeriodSummaryFromDocs counts only fully paid docs in paymentsReceived', () => {

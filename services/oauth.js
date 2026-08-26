@@ -53,13 +53,15 @@ export async function findOrCreateOAuthUser(profile) {
             err.status = 403;
             throw err;
         }
+        let justVerifiedEmail = false;
         if (profile.emailVerified && user.emailVerified === false) {
             user.emailVerified = true;
             user.emailVerificationToken = undefined;
             user.emailVerificationExpires = undefined;
             await user.save();
+            justVerifiedEmail = true;
         }
-        return { user, isNewUser: false };
+        return { user, isNewUser: false, justVerifiedEmail };
     }
 
     if (profile.email) {
@@ -74,13 +76,14 @@ export async function findOrCreateOAuthUser(profile) {
             if (user.authProvider === 'local') {
                 user.authProvider = profile.provider;
             }
+            const justVerifiedEmail = profile.emailVerified && user.emailVerified === false;
             if (profile.emailVerified) {
                 user.emailVerified = true;
                 user.emailVerificationToken = undefined;
                 user.emailVerificationExpires = undefined;
             }
             await user.save();
-            return { user, isNewUser: false };
+            return { user, isNewUser: false, justVerifiedEmail };
         }
     }
 
@@ -106,7 +109,7 @@ export async function findOrCreateOAuthUser(profile) {
         name: profile.name || '',
     });
 
-    return { user, isNewUser: true };
+    return { user, isNewUser: true, justVerifiedEmail: false };
 }
 
 export function getOAuthConfig() {

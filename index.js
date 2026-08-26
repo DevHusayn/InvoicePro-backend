@@ -16,6 +16,8 @@ import businessInfoRoutes from './routes/companyInfo.js';
 import productRoutes from './routes/products.js';
 import supplierRoutes from './routes/suppliers.js';
 import purchaseOrderRoutes from './routes/purchaseOrders.js';
+import inventoryRoutes from './routes/inventory.js';
+import aiRoutes from './routes/ai.js';
 import dashboardRoutes from './routes/dashboard.js';
 import profitRoutes from './routes/profit.js';
 import expenseRoutes from './routes/expenses.js';
@@ -161,6 +163,8 @@ app.use('/api/business-info', businessInfoRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/suppliers', supplierRoutes);
 app.use('/api/purchase-orders', purchaseOrderRoutes);
+app.use('/api/inventory', inventoryRoutes);
+app.use('/api/ai', aiRoutes);
 
 app.get('/', (req, res) => {
     res.send('Waraqah API running');

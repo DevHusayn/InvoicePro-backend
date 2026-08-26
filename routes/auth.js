@@ -21,7 +21,11 @@ import {
     resetFreeInvoiceUsageForUser,
 } from '../utils/invoiceLimits.js';
 import { sendPasswordResetEmail, getEmailErrorMessage, PASSWORD_RESET_EXPIRY_MINUTES, sendEmailVerificationEmail } from '../src/emails/index.js';
-import { sendOAuthSignupEmails, sendRegistrationEmails } from '../src/emails/helpers/accountEmails.js';
+import {
+    sendOAuthSignupEmails,
+    sendRegistrationEmails,
+    sendWelcomeAfterVerification,
+} from '../src/emails/helpers/accountEmails.js';
 import { notifyAccountReactivated, notifyAccountSuspended } from '../src/emails/helpers/premiumNotifications.js';
 import { EMAIL_VERIFICATION_EXPIRY_HOURS } from '../src/emails/config.js';
 import { isStrongPassword, PASSWORD_REQUIREMENTS_MESSAGE } from '../utils/passwordValidation.js';
@@ -512,6 +516,8 @@ router.post('/verify-email/:token', async (req, res) => {
         user.emailVerificationExpires = undefined;
         await user.save();
 
+        await sendWelcomeAfterVerification({ user });
+
         res.json({ message: 'Your email has been verified.', emailVerified: true });
     } catch (err) {
         console.error('Verify-email error:', err);
@@ -625,13 +631,15 @@ router.post('/google', loginLimiter, async (req, res) => {
         }
 
         const profile = await verifyGoogleCredential(credential);
-        const { user, isNewUser } = await findOrCreateOAuthUser(profile);
+        const { user, isNewUser, justVerifiedEmail } = await findOrCreateOAuthUser(profile);
         if (isNewUser) {
             await sendOAuthSignupEmails({
                 user,
                 businessName: user.name,
                 signupMethod: 'google',
             });
+        } else if (justVerifiedEmail) {
+            await sendWelcomeAfterVerification({ user });
         }
         const session = await buildOAuthLoginResponse(res, user, { isNewUser });
         res.json(session);

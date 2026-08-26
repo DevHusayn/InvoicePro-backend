@@ -27,6 +27,8 @@ const quotationSchema = new mongoose.Schema(
             },
         ],
         notes: String,
+        /** Premium: custom thank-you footer on PDF (falls back to default when empty). */
+        documentFooter: String,
         clientAdditionalInfo: String,
         terms: { type: String, default: '' },
         status: { type: String, default: 'draft' },

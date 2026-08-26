@@ -140,7 +140,7 @@ export function buildExpenseSummaryFromRecords(
         return {
             period: {
                 kind: 'all',
-                label: formatAnalyticsPeriodLabel(resolvedPeriod),
+                label: formatAnalyticsPeriodLabel(resolvedPeriod, 'en-US', tz),
                 timezone: tz,
             },
             totals: {
@@ -161,7 +161,13 @@ export function buildExpenseSummaryFromRecords(
             year: resolvedPeriod.year,
             month: resolvedPeriod.month,
             day: resolvedPeriod.day,
-            label: formatAnalyticsPeriodLabel(resolvedPeriod),
+            startYear: resolvedPeriod.startYear,
+            startMonth: resolvedPeriod.startMonth,
+            startDay: resolvedPeriod.startDay,
+            endYear: resolvedPeriod.endYear,
+            endMonth: resolvedPeriod.endMonth,
+            endDay: resolvedPeriod.endDay,
+            label: formatAnalyticsPeriodLabel(resolvedPeriod, 'en-US', tz),
             timezone: tz,
         },
         totals: {

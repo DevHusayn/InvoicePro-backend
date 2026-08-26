@@ -292,7 +292,7 @@ export function buildProfitSummaryFromDocs(
         return {
             period: {
                 kind: 'all',
-                label: formatAnalyticsPeriodLabel(resolvedPeriod),
+                label: formatAnalyticsPeriodLabel(resolvedPeriod, 'en-US', tz),
                 timezone: tz,
             },
             totals: current.totals,
@@ -311,7 +311,13 @@ export function buildProfitSummaryFromDocs(
             year: resolvedPeriod.year,
             month: resolvedPeriod.month,
             day: resolvedPeriod.day,
-            label: formatAnalyticsPeriodLabel(resolvedPeriod),
+            startYear: resolvedPeriod.startYear,
+            startMonth: resolvedPeriod.startMonth,
+            startDay: resolvedPeriod.startDay,
+            endYear: resolvedPeriod.endYear,
+            endMonth: resolvedPeriod.endMonth,
+            endDay: resolvedPeriod.endDay,
+            label: formatAnalyticsPeriodLabel(resolvedPeriod, 'en-US', tz),
             timezone: tz,
         },
         totals: current.totals,

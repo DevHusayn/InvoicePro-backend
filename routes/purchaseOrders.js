@@ -286,14 +286,14 @@ router.post('/:id/receive', auth, validateObjectId(), asyncHandler(async (req, r
         }
 
         const receiveLines = sanitizeReceivePayload(req.body);
-        const updated = await receivePurchaseOrderLines(
+        const { purchaseOrder: updated, sellingPricePrompts } = await receivePurchaseOrderLines(
             req.user.userId,
             purchaseOrder,
             receiveLines
         );
         const plain = updated.toObject();
         const [withSupplier] = await attachSupplierNames([plain], req.user.userId);
-        res.json(withSupplier);
+        res.json({ ...withSupplier, sellingPricePrompts });
     } catch (err) {
         if (err.status === 400) {
             return res.status(400).json({ message: err.message });

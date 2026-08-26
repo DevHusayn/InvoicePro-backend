@@ -21,6 +21,8 @@ import {
     assertQuotationConvertible,
     DEFAULT_QUOTATION_TERMS,
 } from '../utils/quotationValidation.js';
+import { stripPremiumDocumentFooter } from '../utils/invoiceValidation.js';
+import { isUserPremium } from '../utils/premiumAccess.js';
 import { attachQuotationPublicTokenIfNeeded } from '../utils/quotationPublicToken.js';
 import { attachPublicTokenIfNeeded } from '../utils/invoicePublicToken.js';
 import {
@@ -263,6 +265,7 @@ router.post('/', auth, requireEmailVerified, async (req, res) => {
             reserved = true;
         }
         const normalized = normalizeQuotationPayload(req.body, { isCreate: true });
+        stripPremiumDocumentFooter(normalized, await isUserPremium(req.user.userId));
         const payload = await assignQuotationNumber(normalized, null, req.user.userId);
         attachQuotationPublicTokenIfNeeded(payload);
         const quotation = await Quotation.create({
@@ -311,6 +314,7 @@ router.put('/:id', auth, requireEmailVerified, validateObjectId(), async (req, r
         if (!existing) return res.status(404).json({ message: 'Quotation not found' });
 
         const normalized = normalizeQuotationPayload(req.body, { existing });
+        stripPremiumDocumentFooter(normalized, await isUserPremium(req.user.userId));
         if (isFinalizingDraft(existing, normalized)) {
             await reserveInvoiceCreation(req.user.userId);
             reserved = true;
@@ -432,6 +436,7 @@ router.post('/:id/convert', auth, requireEmailVerified, validateObjectId(), asyn
                 productId: item.productId || null,
             })),
             notes: quotation.notes || '',
+            documentFooter: quotation.documentFooter || '',
             clientAdditionalInfo: quotation.clientAdditionalInfo || '',
             status: 'pending',
             currency: quotation.currency,

@@ -12,26 +12,136 @@ import {
 } from './purchaseOrderValidation.js';
 import { recordStockMovement } from './stockLedger.js';
 import { computeWeightedAverageCost } from './itemCostSnapshot.js';
+import { buildSellingPricePrompts } from './purchaseOrderSellingPrice.js';
+
+function roundMoney(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return 0;
+    return Math.round(n * 100) / 100;
+}
+
+async function snapshotLinkedProductsBeforeReceive(userId, items, receiveLines, session = null) {
+    const productIds = [
+        ...new Set(
+            receiveLines
+                .map((line) => items[line.lineIndex]?.productId)
+                .filter(Boolean)
+                .map(String)
+        ),
+    ];
+
+    if (productIds.length === 0) return new Map();
+
+    let query = Product.find({
+        userId,
+        _id: { $in: productIds },
+    }).select('name unitCost unitPrice');
+
+    if (session) {
+        query = query.session(session);
+    }
+
+    const products = await query.lean();
+    const snapshots = new Map();
+
+    for (const product of products) {
+        snapshots.set(String(product._id), {
+            name: product.name,
+            previousUnitCost: roundMoney(product.unitCost),
+            previousUnitPrice: roundMoney(product.unitPrice),
+        });
+    }
+
+    return snapshots;
+}
 
 async function shouldAutoUpdateCostFromPO(userId) {
     const info = await BusinessInfo.findOne({ userId }).select('autoUpdateCostFromPO').lean();
     return Boolean(info?.autoUpdateCostFromPO);
 }
 
-async function updateProductCostFromReceive(userId, productId, receivedQty, poRate) {
-    const product = await Product.findOne({ _id: productId, userId });
+async function updateProductCostFromReceive(userId, productId, receivedQty, poRate, session = null) {
+    let query = Product.findOne({ _id: productId, userId });
+    if (session) {
+        query = query.session(session);
+    }
+    const product = await query;
     if (!product) return;
 
     const newQty = Number(product.quantityOnHand) || 0;
     const oldQty = Math.max(0, newQty - (Number(receivedQty) || 0));
     product.unitCost = computeWeightedAverageCost(oldQty, product.unitCost, receivedQty, poRate);
-    await product.save();
+    await product.save(session ? { session } : undefined);
 }
 
 function validationError(message, status = 400) {
     const err = new Error(message);
     err.status = status;
     throw err;
+}
+
+export function buildCatalogProductFromPoLine(userId, item) {
+    const name = String(item?.description || '').trim();
+    if (!name) {
+        validationError('Each line item needs a description to add stock to your catalog.');
+    }
+
+    const unitCost = Number(item?.rate) || 0;
+
+    return {
+        userId,
+        name,
+        description: '',
+        unitPrice: 0,
+        unitCost,
+        trackInventory: true,
+        quantityOnHand: 0,
+    };
+}
+
+async function findProductById(userId, productId, session = null) {
+    let query = Product.findOne({ _id: productId, userId });
+    if (session) {
+        query = query.session(session);
+    }
+    return query;
+}
+
+async function createCatalogProduct(userId, item, session = null) {
+    const payload = buildCatalogProductFromPoLine(userId, item);
+
+    if (session) {
+        const [product] = await Product.create([payload], { session });
+        return product;
+    }
+
+    return Product.create(payload);
+}
+
+async function ensureProductForReceiveLine(userId, item, lineIndex, session = null) {
+    if (item.productId) {
+        const product = await findProductById(userId, item.productId, session);
+        if (!product) {
+            validationError(`Line ${lineIndex + 1} links to a product that no longer exists.`);
+        }
+
+        if (!product.trackInventory) {
+            product.trackInventory = true;
+            await product.save(session ? { session } : undefined);
+        }
+
+        return product._id;
+    }
+
+    const product = await createCatalogProduct(userId, item, session);
+    return product._id;
+}
+
+async function ensureReceiveProductLinks(userId, items, receiveLines, session = null) {
+    for (const line of receiveLines) {
+        const item = items[line.lineIndex];
+        item.productId = await ensureProductForReceiveLine(userId, item, line.lineIndex, session);
+    }
 }
 
 async function applyReceiveDelta(userId, productId, delta, session, poMeta) {
@@ -86,8 +196,6 @@ export async function receivePurchaseOrderLines(userId, purchaseOrder, receiveLi
         typeof item.toObject === 'function' ? item.toObject() : { ...item }
     );
 
-    const stockUpdates = [];
-
     for (const line of receiveLines) {
         const item = items[line.lineIndex];
         if (!item) {
@@ -109,19 +217,7 @@ export async function receivePurchaseOrderLines(userId, purchaseOrder, receiveLi
         }
 
         item.quantityReceived = alreadyReceived + line.quantity;
-
-        if (item.productId) {
-            stockUpdates.push({
-                productId: item.productId,
-                delta: line.quantity,
-                poRate: Number(item.rate) || 0,
-            });
-        }
     }
-
-    purchaseOrder.items = items;
-    purchaseOrder.status = computePurchaseOrderStatus(items);
-    purchaseOrder.markModified('items');
 
     const poMeta = {
         documentId: purchaseOrder._id,
@@ -129,41 +225,84 @@ export async function receivePurchaseOrderLines(userId, purchaseOrder, receiveLi
         note: '',
     };
     const autoUpdateCost = await shouldAutoUpdateCostFromPO(userId);
+    let sellingPricePrompts = [];
 
-    if (mongoose.connection.readyState === 1 && stockUpdates.length > 1) {
-        const session = await mongoose.startSession();
-        try {
-            await session.withTransaction(async () => {
-                for (const update of stockUpdates) {
-                    await applyReceiveDelta(userId, update.productId, update.delta, session, poMeta);
-                    if (autoUpdateCost) {
-                        await updateProductCostFromReceive(
-                            userId,
-                            update.productId,
-                            update.delta,
-                            update.poRate
-                        );
-                    }
-                }
-                await purchaseOrder.save({ session });
-            });
-        } finally {
-            await session.endSession();
-        }
-    } else {
+    const runReceive = async (session) => {
+        const snapshots = await snapshotLinkedProductsBeforeReceive(
+            userId,
+            items,
+            receiveLines,
+            session
+        );
+
+        await ensureReceiveProductLinks(userId, items, receiveLines, session);
+
+        const stockUpdates = receiveLines.map((line) => {
+            const item = items[line.lineIndex];
+            return {
+                productId: item.productId,
+                delta: line.quantity,
+                poRate: Number(item.rate) || 0,
+            };
+        });
+
+        const receiveResults = [];
+
         for (const update of stockUpdates) {
-            await applyReceiveDelta(userId, update.productId, update.delta, null, poMeta);
+            const product = await applyReceiveDelta(
+                userId,
+                update.productId,
+                update.delta,
+                session,
+                poMeta
+            );
+            if (!product) {
+                validationError('Could not update stock for one or more linked products.');
+            }
+
+            const snapshot = snapshots.get(String(update.productId));
+            let newUnitCost = snapshot?.previousUnitCost ?? roundMoney(product.unitCost);
+
             if (autoUpdateCost) {
                 await updateProductCostFromReceive(
                     userId,
                     update.productId,
                     update.delta,
-                    update.poRate
+                    update.poRate,
+                    session
                 );
+                const refreshed = await findProductById(userId, update.productId, session);
+                newUnitCost = roundMoney(refreshed?.unitCost ?? newUnitCost);
             }
+
+            receiveResults.push({
+                productId: update.productId,
+                delta: update.delta,
+                poRate: update.poRate,
+                newUnitCost,
+            });
         }
-        await purchaseOrder.save();
+
+        sellingPricePrompts = buildSellingPricePrompts(snapshots, receiveResults);
+
+        purchaseOrder.items = items;
+        purchaseOrder.status = computePurchaseOrderStatus(items);
+        purchaseOrder.markModified('items');
+        await purchaseOrder.save(session ? { session } : undefined);
+    };
+
+    if (mongoose.connection.readyState === 1 && receiveLines.length > 1) {
+        const session = await mongoose.startSession();
+        try {
+            await session.withTransaction(async () => {
+                await runReceive(session);
+            });
+        } finally {
+            await session.endSession();
+        }
+    } else {
+        await runReceive(null);
     }
 
-    return purchaseOrder;
+    return { purchaseOrder, sellingPricePrompts };
 }

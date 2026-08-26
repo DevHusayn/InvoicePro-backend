@@ -22,6 +22,8 @@ import {
     buildReceiptPartialFilter,
     buildReceiptFullFilter,
 } from '../utils/receiptValidation.js';
+import { stripPremiumDocumentFooter } from '../utils/invoiceValidation.js';
+import { isUserPremium } from '../utils/premiumAccess.js';
 import { getReceiptPaymentStatusCounts } from '../utils/receiptCounts.js';
 import { getListPeriodMongoFilter } from '../utils/listMonthFilter.js';
 import { RECEIPT_ONLY_FILTER } from '../utils/invoiceDocumentFilter.js';
@@ -230,6 +232,7 @@ router.post('/', auth, requireEmailVerified, async (req, res) => {
             reserved = true;
         }
         const normalized = normalizeReceiptPayload(req.body, { isCreate: true });
+        stripPremiumDocumentFooter(normalized, await isUserPremium(req.user.userId));
         const payload = await assignReceiptNumbers(
             normalized,
             null,
@@ -325,6 +328,7 @@ router.put('/:id', auth, requireEmailVerified, validateObjectId(), async (req, r
         if (!existing) return res.status(404).json({ message: 'Receipt not found' });
 
         const normalized = normalizeReceiptPayload(req.body, { existing });
+        stripPremiumDocumentFooter(normalized, await isUserPremium(req.user.userId));
         if (isFinalizingReceiptDraft(existing, normalized)) {
             await reserveInvoiceCreation(req.user.userId);
             reserved = true;

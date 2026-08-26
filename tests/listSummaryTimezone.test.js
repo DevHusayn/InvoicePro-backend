@@ -10,6 +10,7 @@ import {
     resolveAnalyticsPeriod,
     previousAnalyticsPeriod,
     periodCacheKey,
+    dateMatchesPeriod,
 } from '../utils/timezone.js';
 
 test('normalizeTimezone falls back for invalid values', () => {
@@ -77,4 +78,79 @@ test('previousAnalyticsPeriod and cache keys', () => {
     assert.equal(periodCacheKey({ kind: 'all' }), 'all');
     assert.equal(periodCacheKey({ kind: 'day', year: 2026, month: 8, day: 14 }), 'today:2026-08-14');
     assert.equal(periodCacheKey({ kind: 'month', year: 2026, month: 8 }), 'month:2026-08');
+    assert.equal(periodCacheKey({ kind: 'year', year: 2026 }), 'year:2026');
+    assert.equal(
+        periodCacheKey({
+            kind: 'range',
+            startYear: 2026,
+            startMonth: 1,
+            startDay: 1,
+            endYear: 2026,
+            endMonth: 1,
+            endDay: 15,
+        }),
+        'range:2026-01-01:2026-01-15'
+    );
+});
+
+test('parsePeriodQuery supports week, year, and custom range', () => {
+    const now = new Date('2026-08-14T12:00:00.000Z');
+    const week = parsePeriodQuery({ period: 'week' }, 'Africa/Lagos', now);
+    assert.equal(week.kind, 'week');
+    assert.deepEqual(week, {
+        kind: 'week',
+        startYear: 2026,
+        startMonth: 8,
+        startDay: 9,
+        endYear: 2026,
+        endMonth: 8,
+        endDay: 15,
+    });
+    assert.deepEqual(parsePeriodQuery({ period: 'year' }, 'Africa/Lagos', now), {
+        kind: 'year',
+        year: 2026,
+    });
+    assert.deepEqual(
+        parsePeriodQuery(
+            { period: 'custom', startDate: '2026-08-01', endDate: '2026-08-07' },
+            'Africa/Lagos',
+            now
+        ),
+        {
+            kind: 'range',
+            startYear: 2026,
+            startMonth: 8,
+            startDay: 1,
+            endYear: 2026,
+            endMonth: 8,
+            endDay: 7,
+        }
+    );
+});
+
+test('dateMatchesPeriod handles week, year, and range', () => {
+    const week = {
+        kind: 'week',
+        startYear: 2026,
+        startMonth: 8,
+        startDay: 9,
+        endYear: 2026,
+        endMonth: 8,
+        endDay: 15,
+    };
+    assert.equal(dateMatchesPeriod('2026-08-12', week, 'Africa/Lagos'), true);
+    assert.equal(dateMatchesPeriod('2026-08-08', week, 'Africa/Lagos'), false);
+    assert.equal(dateMatchesPeriod('2026-08-14', { kind: 'year', year: 2026 }, 'Africa/Lagos'), true);
+    assert.equal(dateMatchesPeriod('2025-12-31', { kind: 'year', year: 2026 }, 'Africa/Lagos'), false);
+    const range = {
+        kind: 'range',
+        startYear: 2026,
+        startMonth: 8,
+        startDay: 1,
+        endYear: 2026,
+        endMonth: 8,
+        endDay: 7,
+    };
+    assert.equal(dateMatchesPeriod('2026-08-07', range, 'Africa/Lagos'), true);
+    assert.equal(dateMatchesPeriod('2026-08-08', range, 'Africa/Lagos'), false);
 });

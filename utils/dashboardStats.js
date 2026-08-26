@@ -16,6 +16,7 @@ import {
     computeMoneyPercentChange,
     computeRevenueStatsFromDocs,
 } from './dashboardAnalytics.js';
+import { syncOverdueInvoicesForUser } from './invoiceOverdue.js';
 import { computePeriodProfitFromDocs } from './profitAnalytics.js';
 import { getExpenseRecordsForUser, computePeriodExpensesFromRecords } from './expenseAnalytics.js';
 import { loadProductCostMap } from './productCostResolver.js';
@@ -120,6 +121,7 @@ async function attachClientNames(docs) {
 /** Core dashboard payload — stats, recent documents, overdue alerts. */
 export async function getDashboardForUser(userId, { summaryYear, summaryMonth, period } = {}) {
     const uid = toUserObjectId(userId);
+    await syncOverdueInvoicesForUser(uid);
     const nonDraftFilter = { userId: uid, status: { $ne: 'draft' } };
 
     const [
@@ -135,7 +137,7 @@ export async function getDashboardForUser(userId, { summaryYear, summaryMonth, p
         totalReceipts,
     ] = await Promise.all([
         Invoice.find(nonDraftFilter)
-            .select('date status total amountPaid documentType items discount discountType discountValue')
+            .select('date dueDate status total amountPaid documentType items discount discountType discountValue')
             .lean(),
         getBusinessTimezone(userId),
         Invoice.find({ ...nonDraftFilter, ...INVOICE_ONLY_FILTER })

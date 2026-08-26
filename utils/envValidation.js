@@ -1,3 +1,5 @@
+import { isAiDraftsEnabled } from './aiDraftsEnabled.js';
+
 const MIN_JWT_SECRET_LENGTH = 32;
 
 export function isProduction() {
@@ -26,6 +28,10 @@ export function validateEnv() {
         }
     } else if (process.env.ALLOW_DEV_PLAN === 'true') {
         warnings.push('ALLOW_DEV_PLAN is enabled — do not use in production.');
+    }
+
+    if (isProduction() && isAiDraftsEnabled() && !process.env.AI_API_KEY?.trim()) {
+        warnings.push('AI_API_KEY is not set — Premium document drafting will be unavailable.');
     }
 
     if (isProduction() && process.env.VERCEL_REGION && process.env.MONGO_URI?.includes('mongodb')) {

@@ -179,8 +179,12 @@ export function assertPurchaseOrderUpdateAllowed(existing, payload) {
         throw validationError('Line items can only be edited while the purchase order is a draft.');
     }
 
-    if (next === PO_RECEIVED && !PO_RECEIVABLE.includes(prev) && prev !== PO_RECEIVED) {
-        throw validationError('Only sent or partially received purchase orders can be marked received.');
+    if (
+        payload.status !== undefined
+        && (next === PO_RECEIVED || next === PO_PARTIAL)
+        && prev !== next
+    ) {
+        throw validationError('Use Receive stock to update received quantities and status.');
     }
 
     if (prev === PO_CANCELLED && next !== PO_CANCELLED) {

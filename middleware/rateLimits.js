@@ -110,6 +110,14 @@ export const loginLimiter = buildLimiter({
     ipOnly: true,
 });
 
+/** Extra cap for Premium AI document drafts (on top of the global write limiter). */
+export const aiDraftLimiter = buildLimiter({
+    windowMs: ONE_HOUR,
+    max: 20,
+    message: 'Too many AI draft requests. Please try again later.',
+    prefix: 'ai-draft',
+});
+
 export const registerLimiter = buildLimiter({
     windowMs: ONE_HOUR,
     max: 5,

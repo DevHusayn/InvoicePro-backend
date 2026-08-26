@@ -3,6 +3,11 @@ import {
     getDatePartsInTimezone,
     getUtcRangeForDayInTimezone,
     getUtcRangeForMonthInTimezone,
+    getUtcRangeForDateRangeInTimezone,
+    getUtcRangeForWeekInTimezone,
+    getUtcRangeForYearInTimezone,
+    getWeekBoundsInTimezone,
+    parseDateInputValue,
     toDateInputValue,
     shiftDateByDays,
 } from './timezone.js';
@@ -25,6 +30,25 @@ export function parseListPeriodQuery(query = {}) {
     }
     if (raw === 'today') {
         return { kind: 'today' };
+    }
+    if (raw === 'week') {
+        return { kind: 'week' };
+    }
+    if (raw === 'year') {
+        return { kind: 'year' };
+    }
+    if (raw === 'custom') {
+        const start = parseDateInputValue(query.startDate);
+        const end = parseDateInputValue(query.endDate);
+        if (!start || !end) return null;
+        if (
+            start.year > end.year ||
+            (start.year === end.year && start.month > end.month) ||
+            (start.year === end.year && start.month === end.month && start.day > end.day)
+        ) {
+            return null;
+        }
+        return { kind: 'custom', start, end };
     }
     const month = parseListMonthQuery(query);
     if (month) return { kind: 'month', ...month };
@@ -62,6 +86,21 @@ export function buildIssueDateDayFilter(year, month, day) {
     return { date: { $gte: startStr, $lt: endStr } };
 }
 
+export function buildIssueDateRangeFilter(start, end) {
+    if (!start || !end) return null;
+    const startStr = toDateInputValue(start.year, start.month, start.day);
+    const next = shiftDateByDays(end.year, end.month, end.day, 1);
+    const endStr = toDateInputValue(next.year, next.month, next.day);
+    return { date: { $gte: startStr, $lt: endStr } };
+}
+
+export function buildIssueDateYearFilter(year) {
+    return buildIssueDateRangeFilter(
+        { year, month: 1, day: 1 },
+        { year, month: 12, day: 31 }
+    );
+}
+
 /**
  * Mongo date filter for list endpoints.
  * dateField 'date' uses YYYY-MM-DD string ranges; 'createdAt' uses timezone UTC instants.
@@ -70,19 +109,34 @@ export async function getListPeriodMongoFilter(query, userId, { dateField = 'dat
     const parsed = parseListPeriodQuery(query);
     if (!parsed || parsed.kind === 'all') return null;
 
+    const timeZone = await getBusinessTimezone(userId);
+
     if (dateField === 'createdAt') {
-        const timeZone = await getBusinessTimezone(userId);
-        if (parsed.kind === 'today' || parsed.kind === 'month-current') {
+        if (parsed.kind === 'today') {
             const parts = getDatePartsInTimezone(timeZone);
-            if (parsed.kind === 'today') {
-                const { start, end } = getUtcRangeForDayInTimezone(
-                    parts.year,
-                    parts.month,
-                    parts.day,
-                    timeZone
-                );
-                return { createdAt: { $gte: start, $lt: end } };
-            }
+            const { start, end } = getUtcRangeForDayInTimezone(
+                parts.year,
+                parts.month,
+                parts.day,
+                timeZone
+            );
+            return { createdAt: { $gte: start, $lt: end } };
+        }
+        if (parsed.kind === 'week') {
+            const { start, end } = getUtcRangeForWeekInTimezone(timeZone);
+            return { createdAt: { $gte: start, $lt: end } };
+        }
+        if (parsed.kind === 'year') {
+            const { year } = getDatePartsInTimezone(timeZone);
+            const { start, end } = getUtcRangeForYearInTimezone(year, timeZone);
+            return { createdAt: { $gte: start, $lt: end } };
+        }
+        if (parsed.kind === 'custom') {
+            const { start, end } = getUtcRangeForDateRangeInTimezone(parsed.start, parsed.end, timeZone);
+            return { createdAt: { $gte: start, $lt: end } };
+        }
+        if (parsed.kind === 'month-current') {
+            const parts = getDatePartsInTimezone(timeZone);
             const { start, end } = getUtcRangeForMonthInTimezone(parts.year, parts.month, timeZone);
             return { createdAt: { $gte: start, $lt: end } };
         }
@@ -90,12 +144,23 @@ export async function getListPeriodMongoFilter(query, userId, { dateField = 'dat
         return { createdAt: { $gte: start, $lt: end } };
     }
 
-    if (parsed.kind === 'today' || parsed.kind === 'month-current') {
-        const timeZone = await getBusinessTimezone(userId);
+    if (parsed.kind === 'today') {
         const parts = getDatePartsInTimezone(timeZone);
-        if (parsed.kind === 'today') {
-            return buildIssueDateDayFilter(parts.year, parts.month, parts.day);
-        }
+        return buildIssueDateDayFilter(parts.year, parts.month, parts.day);
+    }
+    if (parsed.kind === 'week') {
+        const { start, end } = getWeekBoundsInTimezone(timeZone);
+        return buildIssueDateRangeFilter(start, end);
+    }
+    if (parsed.kind === 'year') {
+        const { year } = getDatePartsInTimezone(timeZone);
+        return buildIssueDateYearFilter(year);
+    }
+    if (parsed.kind === 'custom') {
+        return buildIssueDateRangeFilter(parsed.start, parsed.end);
+    }
+    if (parsed.kind === 'month-current') {
+        const parts = getDatePartsInTimezone(timeZone);
         return buildIssueDateMonthFilter(parts.year, parts.month);
     }
 

@@ -40,21 +40,15 @@ export async function notifyAdminNewUser({ user, businessName, signupMethod = 'e
 }
 
 /**
- * Send welcome + verification emails after registration.
+ * Send verification + admin notification after email/password registration.
+ * Welcome is deferred until the user verifies their email.
  * Must be awaited before the HTTP response on serverless (Vercel).
  * Failures are logged but do not block signup.
  */
 export async function sendRegistrationEmails({ user, verificationToken, businessName }) {
-    const baseUrl = getFrontendBaseUrl();
-    const dashboardUrl = baseUrl;
-    const verificationUrl = `${baseUrl}/verify-email/${verificationToken}`;
+    const verificationUrl = `${getFrontendBaseUrl()}/verify-email/${verificationToken}`;
 
     const results = await Promise.allSettled([
-        sendWelcomeEmail({
-            to: user.email,
-            userName: user.name,
-            dashboardUrl,
-        }),
         sendEmailVerificationEmail({
             to: user.email,
             userName: user.name,
@@ -67,7 +61,26 @@ export async function sendRegistrationEmails({ user, verificationToken, business
         }),
     ]);
 
-    logSignupEmailFailures(results, ['welcome', 'email-verification', 'admin-new-user']);
+    logSignupEmailFailures(results, ['email-verification', 'admin-new-user']);
+}
+
+/**
+ * Send the founder welcome email after a manual signup verifies their email.
+ * Must be awaited before the HTTP response on serverless (Vercel).
+ * Failures are logged but do not block verification.
+ */
+export async function sendWelcomeAfterVerification({ user }) {
+    if (!user?.email?.trim()) return;
+
+    try {
+        await sendWelcomeEmail({
+            to: user.email,
+            userName: user.name,
+            dashboardUrl: getFrontendBaseUrl(),
+        });
+    } catch (err) {
+        console.error('[Waraqah Email] Welcome-after-verification failed:', err?.message || err);
+    }
 }
 
 /**

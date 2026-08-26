@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+    assertPurchaseOrderUpdateAllowed,
     computePurchaseOrderStatus,
     PO_PARTIAL,
     PO_RECEIVED,
@@ -37,5 +38,27 @@ test('sanitizeReceivePayload rejects empty payload', () => {
     assert.throws(
         () => sanitizeReceivePayload({ lines: [] }),
         (err) => err.message.includes('At least one receive line')
+    );
+});
+
+test('assertPurchaseOrderUpdateAllowed blocks marking received via PUT', () => {
+    assert.throws(
+        () =>
+            assertPurchaseOrderUpdateAllowed(
+                { status: PO_SENT },
+                { status: PO_RECEIVED }
+            ),
+        (err) => err.message.includes('Receive stock')
+    );
+});
+
+test('assertPurchaseOrderUpdateAllowed blocks marking partial via PUT', () => {
+    assert.throws(
+        () =>
+            assertPurchaseOrderUpdateAllowed(
+                { status: PO_SENT },
+                { status: PO_PARTIAL }
+            ),
+        (err) => err.message.includes('Receive stock')
     );
 });
