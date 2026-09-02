@@ -1,7 +1,6 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { format } from 'date-fns';
-import { getStatementCurrencySymbol } from './monthlyStatementBuild.js';
 
 const PAGE_H = 297;
 const FOOTER_RESERVE = 22;
@@ -13,11 +12,17 @@ function hexToRgb(hex) {
         : [22, 163, 74];
 }
 
-function formatMoney(value, currencySymbol) {
-    return `${currencySymbol} ${Number(value || 0).toLocaleString('en-US', {
+/** ISO code (NGN, USD) — Helvetica cannot render ₦ / € / GH₵. */
+function formatMoney(value, currencyCode) {
+    return `${currencyCode} ${Number(value || 0).toLocaleString('en-US', {
         minimumFractionDigits: 0,
         maximumFractionDigits: 2,
     })}`;
+}
+
+function getStatementCurrencyCode(code = 'NGN') {
+    const normalized = String(code || 'NGN').toUpperCase();
+    return /^[A-Z]{3}$/.test(normalized) ? normalized : 'NGN';
 }
 
 function applyColumnAlignment(data, alignments) {
@@ -38,7 +43,7 @@ export function generateMonthlyStatementPdfBuffer(statement, businessInfo) {
     const primaryColor = hexToRgb(businessInfo?.brandColor || '#16A34A');
     const textColor = [31, 41, 55];
     const grayColor = [107, 114, 128];
-    const currencySymbol = getStatementCurrencySymbol(businessInfo?.defaultCurrency);
+    const currencyCode = getStatementCurrencyCode(businessInfo?.defaultCurrency);
 
     doc.setFillColor(255, 255, 255);
     doc.rect(0, 0, 210, PAGE_H, 'F');
@@ -64,12 +69,12 @@ export function generateMonthlyStatementPdfBuffer(statement, businessInfo) {
     doc.text('Statement summary', 15, 52);
 
     const summaryBody = [
-        ['Paid', formatMoney(statement.totals.paid, currencySymbol)],
-        ['Partial', formatMoney(statement.totals.partial, currencySymbol)],
-        ['Pending', formatMoney(statement.totals.pending, currencySymbol)],
-        ['Overdue', formatMoney(statement.totals.overdue, currencySymbol)],
-        ['Cancelled', formatMoney(statement.totals.cancelled, currencySymbol)],
-        ['Total billed', formatMoney(statement.totals.total, currencySymbol)],
+        ['Paid', formatMoney(statement.totals.paid, currencyCode)],
+        ['Balance', formatMoney(statement.totals.partial, currencyCode)],
+        ['Pending', formatMoney(statement.totals.pending, currencyCode)],
+        ['Overdue', formatMoney(statement.totals.overdue, currencyCode)],
+        ['Cancelled', formatMoney(statement.totals.cancelled, currencyCode)],
+        ['Total billed', formatMoney(statement.totals.total, currencyCode)],
         ['Documents in period', String(statement.totals.documentCount)],
     ];
 
@@ -109,7 +114,7 @@ export function generateMonthlyStatementPdfBuffer(statement, businessInfo) {
         const tableHead = [
             'Client',
             'Paid',
-            'Partial',
+            'Balance',
             'Pending',
             'Overdue',
             'Cancelled',
@@ -120,22 +125,22 @@ export function generateMonthlyStatementPdfBuffer(statement, businessInfo) {
             row.clientSubtitle
                 ? `${row.clientName}\n${row.clientSubtitle}`
                 : row.clientName,
-            formatMoney(row.paid, currencySymbol),
-            formatMoney(row.partial, currencySymbol),
-            formatMoney(row.pending, currencySymbol),
-            formatMoney(row.overdue, currencySymbol),
-            formatMoney(row.cancelled, currencySymbol),
-            formatMoney(row.total, currencySymbol),
+            formatMoney(row.paid, currencyCode),
+            formatMoney(row.partial, currencyCode),
+            formatMoney(row.pending, currencyCode),
+            formatMoney(row.overdue, currencyCode),
+            formatMoney(row.cancelled, currencyCode),
+            formatMoney(row.total, currencyCode),
         ]);
 
         const footRow = [
             'Total',
-            formatMoney(statement.totals.paid, currencySymbol),
-            formatMoney(statement.totals.partial, currencySymbol),
-            formatMoney(statement.totals.pending, currencySymbol),
-            formatMoney(statement.totals.overdue, currencySymbol),
-            formatMoney(statement.totals.cancelled, currencySymbol),
-            formatMoney(statement.totals.total, currencySymbol),
+            formatMoney(statement.totals.paid, currencyCode),
+            formatMoney(statement.totals.partial, currencyCode),
+            formatMoney(statement.totals.pending, currencyCode),
+            formatMoney(statement.totals.overdue, currencyCode),
+            formatMoney(statement.totals.cancelled, currencyCode),
+            formatMoney(statement.totals.total, currencyCode),
         ];
 
         const clientAlign = ['left', 'center', 'center', 'center', 'center', 'center', 'center'];
