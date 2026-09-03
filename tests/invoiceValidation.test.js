@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
     assertInvoiceDeleteAllowed,
+    normalizeInvoicePayload,
     sanitizeInvoicePayload,
 } from '../utils/invoiceValidation.js';
 
@@ -12,7 +13,7 @@ test('sanitizeInvoicePayload rejects invalid status', () => {
     );
 });
 
-test('sanitizeInvoicePayload disables recurring invoices', () => {
+test('sanitizeInvoicePayload accepts recurring fields', () => {
     const payload = sanitizeInvoicePayload({
         status: 'pending',
         isRecurring: true,
@@ -21,9 +22,65 @@ test('sanitizeInvoicePayload disables recurring invoices', () => {
         items: [{ description: 'Consulting', quantity: 1, rate: 50000 }],
     });
 
-    assert.equal(payload.isRecurring, false);
+    assert.equal(payload.isRecurring, true);
+    assert.equal(payload.recurringFrequency, 'monthly');
+    assert.equal(payload.recurringEndDate, '2026-12-31');
+});
+
+test('sanitizeInvoicePayload drops unknown recurring frequencies', () => {
+    const payload = sanitizeInvoicePayload({
+        status: 'pending',
+        isRecurring: true,
+        recurringFrequency: 'daily',
+        items: [{ description: 'Consulting', quantity: 1, rate: 50000 }],
+    });
+
     assert.equal(payload.recurringFrequency, undefined);
-    assert.equal(payload.recurringEndDate, undefined);
+});
+
+test('sanitizeInvoicePayload rejects invalid recurring end dates', () => {
+    assert.throws(
+        () =>
+            sanitizeInvoicePayload({
+                status: 'pending',
+                isRecurring: true,
+                recurringFrequency: 'monthly',
+                recurringEndDate: '31-12-2026',
+            }),
+        (err) => err.message.includes('valid recurring end date')
+    );
+});
+
+test('normalizeInvoicePayload sets next date for recurring pending invoices', () => {
+    const payload = normalizeInvoicePayload(
+        {
+            status: 'pending',
+            date: '2026-08-26',
+            isRecurring: true,
+            recurringFrequency: 'monthly',
+            items: [{ description: 'Retainer', quantity: 1, rate: 10000 }],
+        },
+        { isCreate: true }
+    );
+
+    assert.equal(payload.isRecurring, true);
+    assert.equal(payload.recurringNextDate, '2026-09-26');
+});
+
+test('normalizeInvoicePayload keeps drafts from generating a next date', () => {
+    const payload = normalizeInvoicePayload(
+        {
+            status: 'draft',
+            date: '2026-08-26',
+            isRecurring: true,
+            recurringFrequency: 'weekly',
+            items: [{ description: 'Retainer', quantity: 1, rate: 10000 }],
+        },
+        { isCreate: true }
+    );
+
+    assert.equal(payload.isRecurring, true);
+    assert.equal(payload.recurringNextDate, null);
 });
 
 test('sanitizeInvoicePayload accepts valid draft invoice', () => {

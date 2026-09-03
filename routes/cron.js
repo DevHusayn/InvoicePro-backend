@@ -4,6 +4,7 @@ import { sendPremiumExpiryReminders } from '../premiumExpiryReminderAutomation.j
 import { sendLowStockDigests } from '../lowStockAlertAutomation.js';
 import { sendMonthlyStatements } from '../monthlyStatementAutomation.js';
 import { generateRecurringInvoices } from '../utils/recurringInvoices.js';
+import { generateRecurringExpenses } from '../utils/recurringExpenses.js';
 import { syncAllOverdueInvoices } from '../utils/invoiceOverdue.js';
 import { syncAllExpiredQuotations } from '../utils/quotationExpire.js';
 import asyncHandler from '../middleware/asyncHandler.js';
@@ -52,6 +53,12 @@ router.get('/expire-quotations', verifyCronSecret, asyncHandler(async (req, res)
 router.get('/recurring-invoices', verifyCronSecret, asyncHandler(async (req, res) => {
     const { createdCount } = await generateRecurringInvoices();
     res.json({ ok: true, message: 'Recurring invoices processed.', createdCount });
+}));
+
+/** Vercel Cron — generate expenses from active recurring templates. */
+router.get('/recurring-expenses', verifyCronSecret, asyncHandler(async (req, res) => {
+    const { createdCount } = await generateRecurringExpenses();
+    res.json({ ok: true, message: 'Recurring expenses processed.', createdCount });
 }));
 
 /** Vercel Cron — daily low-stock digest for opted-in users. */

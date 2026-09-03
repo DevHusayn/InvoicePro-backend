@@ -1,4 +1,9 @@
 import mongoose from 'mongoose';
+import {
+    applyRecurringSchedule,
+    isRecurringFrequency,
+    sanitizeRecurringEndDate,
+} from './recurrence.js';
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const HEX_COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;
@@ -232,6 +237,33 @@ function sanitizeExpenseCategoryValue(value) {
     return category;
 }
 
+function sanitizeExpenseRecurringFields(body, existing = null, date = null) {
+    const data = {};
+    if (date) data.date = date;
+    if (body.isRecurring !== undefined) {
+        data.isRecurring = Boolean(body.isRecurring);
+    }
+    if (body.recurringFrequency !== undefined) {
+        data.recurringFrequency = isRecurringFrequency(body.recurringFrequency)
+            ? body.recurringFrequency
+            : undefined;
+    }
+    if (body.recurringEndDate !== undefined) {
+        data.recurringEndDate = sanitizeRecurringEndDate(body.recurringEndDate);
+    }
+
+    const touchesRecurring =
+        body.isRecurring !== undefined
+        || body.recurringFrequency !== undefined
+        || body.recurringEndDate !== undefined
+        || Boolean(existing?.isRecurring && date && existing.date && date !== existing.date);
+
+    if (!touchesRecurring) return data;
+
+    applyRecurringSchedule(data, { existing });
+    return data;
+}
+
 export function sanitizeExpensePayload(body) {
     if (!body || typeof body !== 'object' || Array.isArray(body)) {
         const err = new Error('Invalid expense payload.');
@@ -239,16 +271,19 @@ export function sanitizeExpensePayload(body) {
         throw err;
     }
 
-    return {
-        date: sanitizeExpenseDate(body.date),
+    const date = sanitizeExpenseDate(body.date);
+    const data = {
+        date,
         amount: sanitizeExpenseAmount(body.amount),
         category: sanitizeExpenseCategoryValue(body.category),
         description: sanitizePlainText(body.description, 500),
         vendor: sanitizePlainText(body.vendor, 200),
+        ...sanitizeExpenseRecurringFields(body, null, date),
     };
+    return data;
 }
 
-export function sanitizeExpenseUpdates(body) {
+export function sanitizeExpenseUpdates(body, existing = null) {
     if (!body || typeof body !== 'object' || Array.isArray(body)) {
         const err = new Error('Invalid expense payload.');
         err.status = 400;
@@ -271,5 +306,7 @@ export function sanitizeExpenseUpdates(body) {
     if (body.vendor !== undefined) {
         updates.vendor = sanitizePlainText(body.vendor, 200);
     }
+    const date = updates.date || existing?.date || null;
+    Object.assign(updates, sanitizeExpenseRecurringFields(body, existing, date));
     return updates;
 }

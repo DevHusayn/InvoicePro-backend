@@ -63,6 +63,7 @@ import { INVOICE_ONLY_FILTER } from '../utils/invoiceDocumentFilter.js';
 import { countListSummary, buildSummaryResponse, resolveListSummaryOptions, isSummaryOnlyRequest, shouldFetchListSummary } from '../utils/listSummary.js';
 import { getInvoiceStatusCounts } from '../utils/dashboardAnalytics.js';
 import { getListPeriodMongoFilter } from '../utils/listMonthFilter.js';
+import { applyListRecurringAndDateFilter } from '../utils/recurringListFilter.js';
 import { sendInvoiceListExport } from '../utils/invoiceListExport.js';
 import {
     applyInventoryTransition,
@@ -72,6 +73,7 @@ import {
 } from '../utils/inventory.js';
 import { snapshotItemUnitCosts } from '../utils/itemCostSnapshot.js';
 import { isUserPremium } from '../utils/premiumAccess.js';
+import { stoppedRecurringFields } from '../utils/recurrence.js';
 
 const router = express.Router();
 
@@ -192,7 +194,10 @@ router.get('/', auth, asyncHandler(async (req, res) => {
         filter.status = status;
     }
     const dateFilter = await getListPeriodMongoFilter(req.query, userId);
-    if (dateFilter) Object.assign(filter, dateFilter);
+    applyListRecurringAndDateFilter(filter, {
+        recurring: req.query.recurring,
+        dateFilter,
+    });
 
     if (search) {
         const clientIds = await resolveInvoiceSearchClientIds(userId, search);
@@ -669,6 +674,27 @@ router.post('/:id/send-receipt', auth, requireEmailVerified, validateObjectId(),
         }
         console.error('Send receipt email error:', err);
         return res.status(503).json({ message: getEmailErrorMessage(err) });
+    }
+});
+
+router.post('/:id/stop-recurring', auth, requireEmailVerified, validateObjectId(), async (req, res) => {
+    try {
+        const invoice = await Invoice.findOne({
+            _id: req.params.id,
+            userId: req.user.userId,
+            ...INVOICE_ONLY_FILTER,
+        });
+        if (!invoice) return res.status(404).json({ message: 'Invoice not found' });
+        if (!invoice.isRecurring) {
+            return res.status(400).json({ message: 'This invoice is not set to repeat.' });
+        }
+
+        invoice.set(stoppedRecurringFields());
+        invoice.recurringFrequency = undefined;
+        await invoice.save();
+        res.json(invoice);
+    } catch (err) {
+        res.status(500).json({ message: err.message || 'Could not stop recurring invoice' });
     }
 });
 

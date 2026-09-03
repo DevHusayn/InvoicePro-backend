@@ -6,7 +6,9 @@ import asyncHandler from '../middleware/asyncHandler.js';
 import {
     sanitizeExpensePayload,
     sanitizeExpenseUpdates,
+    sanitizePlainText,
 } from '../utils/sanitize.js';
+import { stoppedRecurringFields } from '../utils/recurrence.js';
 import {
     parsePagination,
     paginateFind,
@@ -16,6 +18,7 @@ import {
 import { getListPeriodMongoFilter } from '../utils/listMonthFilter.js';
 import { getBusinessTimezone, resolveAnalyticsPeriod } from '../utils/timezone.js';
 import { getExpenseSummaryForUser } from '../utils/expenseAnalytics.js';
+import { applyListRecurringAndDateFilter } from '../utils/recurringListFilter.js';
 
 const router = express.Router();
 
@@ -34,7 +37,14 @@ router.get('/', auth, asyncHandler(async (req, res) => {
     if (searchFilter) Object.assign(filter, searchFilter);
 
     const dateFilter = await getListPeriodMongoFilter(req.query, userId);
-    if (dateFilter) Object.assign(filter, dateFilter);
+    applyListRecurringAndDateFilter(filter, {
+        recurring: req.query.recurring,
+        dateFilter,
+    });
+    const category = sanitizePlainText(req.query.category, 50);
+    if (category) {
+        filter.category = category;
+    }
 
     const { data, total } = await paginateFind(Expense, filter, {
         skip,
@@ -65,13 +75,35 @@ router.get('/:id', auth, validateObjectId(), asyncHandler(async (req, res) => {
 }));
 
 router.put('/:id', auth, validateObjectId(), asyncHandler(async (req, res) => {
-    const updates = sanitizeExpenseUpdates(req.body);
+    const existing = await Expense.findOne({
+        _id: req.params.id,
+        userId: req.user.userId,
+    });
+    if (!existing) return res.status(404).json({ message: 'Expense not found' });
+
+    const updates = sanitizeExpenseUpdates(req.body, existing);
     const expense = await Expense.findOneAndUpdate(
         { _id: req.params.id, userId: req.user.userId },
         updates,
         { new: true }
     );
     if (!expense) return res.status(404).json({ message: 'Expense not found' });
+    res.json(expense);
+}));
+
+router.post('/:id/stop-recurring', auth, validateObjectId(), asyncHandler(async (req, res) => {
+    const expense = await Expense.findOne({
+        _id: req.params.id,
+        userId: req.user.userId,
+    });
+    if (!expense) return res.status(404).json({ message: 'Expense not found' });
+    if (!expense.isRecurring) {
+        return res.status(400).json({ message: 'This expense is not set to repeat.' });
+    }
+
+    expense.set(stoppedRecurringFields());
+    expense.recurringFrequency = undefined;
+    await expense.save();
     res.json(expense);
 }));
 

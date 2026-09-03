@@ -75,6 +75,12 @@ const invoiceSchema = new mongoose.Schema({
         required: false,
     },
     recurringEndDate: { type: String, default: null },
+    recurringNextDate: { type: String, default: null },
+    recurringSourceId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Invoice',
+        default: null,
+    },
     lastPaymentReminderAt: { type: Date, default: null },
     /** Set when the invoice notification is emailed to the client. */
     clientInvoiceEmailedAt: { type: Date, default: null },
@@ -96,6 +102,7 @@ invoiceSchema.index({ userId: 1, invoiceNumber: 1 }, { unique: true, sparse: tru
 invoiceSchema.index({ userId: 1, receiptNumber: 1 }, { unique: true, sparse: true });
 invoiceSchema.index({ userId: 1, status: 1 });
 invoiceSchema.index({ status: 1, dueDate: 1 });
-invoiceSchema.index({ isRecurring: 1, recurringEndDate: 1 });
+invoiceSchema.index({ isRecurring: 1, recurringNextDate: 1 });
+invoiceSchema.index({ recurringSourceId: 1 });
 
 export default mongoose.model('Invoice', invoiceSchema);

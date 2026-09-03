@@ -2,6 +2,7 @@ import { getNextInvoiceNumber, receiptFromInvoiceNumber } from './invoiceNumber.
 import { isValidObjectId, sanitizeNumber, sanitizePlainText } from './sanitize.js';
 import { getInvoiceAmountPaid } from './invoicePayments.js';
 import { INVOICE_ONLY_FILTER } from './invoiceDocumentFilter.js';
+import { applyRecurringSchedule, sanitizeRecurringEndDate } from './recurrence.js';
 
 export { INVOICE_ONLY_FILTER };
 
@@ -137,7 +138,7 @@ export function sanitizeInvoicePayload(body) {
             : undefined;
     data.datePaid = data.datePaid !== undefined ? sanitizePlainText(data.datePaid, 32) : undefined;
     data.recurringEndDate =
-        data.recurringEndDate !== undefined ? sanitizePlainText(data.recurringEndDate, 32) : undefined;
+        data.recurringEndDate !== undefined ? sanitizeRecurringEndDate(data.recurringEndDate) : undefined;
     data.currency =
         data.currency !== undefined
             ? (() => {
@@ -172,11 +173,6 @@ export function sanitizeInvoicePayload(body) {
     if (data.isRecurring !== undefined) {
         data.isRecurring = Boolean(data.isRecurring);
     }
-
-    // Recurring invoices disabled until automation is supported in production.
-    data.isRecurring = false;
-    delete data.recurringFrequency;
-    delete data.recurringEndDate;
 
     return data;
 }
@@ -309,6 +305,7 @@ export function normalizeInvoicePayload(body, { isCreate = false, existing = nul
 
     data.status = status;
     data.documentType = 'invoice';
+    applyRecurringSchedule(data, { existing });
     return data;
 }
 
