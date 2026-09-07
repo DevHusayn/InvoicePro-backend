@@ -44,6 +44,8 @@ import {
 } from '../utils/pagination.js';
 import { countListSummary, buildSummaryResponse, resolveListSummaryOptions, isSummaryOnlyRequest, shouldFetchListSummary } from '../utils/listSummary.js';
 import { sendReceiptListExport } from '../utils/receiptListExport.js';
+import { applyClientSnapshot, DOCUMENT_CLIENT_SEARCH_FIELDS } from '../utils/clientSnapshot.js';
+import { attachClientNamesToDocuments } from '../utils/attachClientNames.js';
 import {
     applyInventoryTransition,
     checkStockWarnings,
@@ -87,32 +89,7 @@ function assertReceiptRecord(doc) {
 }
 
 async function attachClientNames(receipts, userId) {
-    const clientIds = [
-        ...new Set(
-            receipts
-                .map((r) => r.clientId)
-                .filter(Boolean)
-                .map((id) => String(id))
-        ),
-    ];
-    if (clientIds.length === 0) {
-        return receipts.map((r) => ({ ...r, clientName: null, clientCompany: null }));
-    }
-    const clients = await Client.find({
-        userId,
-        _id: { $in: clientIds },
-    })
-        .select('name company')
-        .lean();
-    const byId = new Map(clients.map((c) => [String(c._id), c]));
-    return receipts.map((r) => {
-        const client = r.clientId ? byId.get(String(r.clientId)) : null;
-        return {
-            ...r,
-            clientName: client?.name || null,
-            clientCompany: client?.company || null,
-        };
-    });
+    return attachClientNamesToDocuments(receipts, userId);
 }
 
 const RECEIPT_LIST_BASE = { status: PAID, ...RECEIPT_ONLY_FILTER };
@@ -122,7 +99,7 @@ async function mergeReceiptSearchFilter(filter, userId, search) {
     if (!q) return filter;
 
     const clientIds = await resolveSearchClientIds(userId, q);
-    const textFilter = buildSearchFilter(q, ['receiptNumber']);
+    const textFilter = buildSearchFilter(q, ['receiptNumber', ...DOCUMENT_CLIENT_SEARCH_FIELDS]);
     const or = [...(textFilter?.$or || [])];
     if (clientIds.length > 0) {
         or.push({ clientId: { $in: clientIds } });
@@ -233,6 +210,7 @@ router.post('/', auth, requireEmailVerified, async (req, res) => {
         }
         const normalized = normalizeReceiptPayload(req.body, { isCreate: true });
         stripPremiumDocumentFooter(normalized, await isUserPremium(req.user.userId));
+        await applyClientSnapshot(normalized, req.user.userId);
         const payload = await assignReceiptNumbers(
             normalized,
             null,
@@ -287,7 +265,15 @@ router.post('/', auth, requireEmailVerified, async (req, res) => {
 async function attachClientToReceipt(receipt, userId) {
     const doc = typeof receipt.toObject === 'function' ? receipt.toObject() : { ...receipt };
     if (!doc.clientId) {
-        doc.client = null;
+        doc.client = doc.clientName || doc.clientCompany
+            ? {
+                name: doc.clientName || '',
+                email: '',
+                company: doc.clientCompany || '',
+                phone: '',
+                address: '',
+            }
+            : null;
         return doc;
     }
     const client = await Client.findOne({ _id: doc.clientId, userId })
@@ -303,7 +289,15 @@ async function attachClientToReceipt(receipt, userId) {
             phone: client.phone || '',
             address: client.address || '',
         }
-        : null;
+        : (doc.clientName || doc.clientCompany
+            ? {
+                name: doc.clientName || '',
+                email: '',
+                company: doc.clientCompany || '',
+                phone: '',
+                address: '',
+            }
+            : null);
     return doc;
 }
 
@@ -329,6 +323,7 @@ router.put('/:id', auth, requireEmailVerified, validateObjectId(), async (req, r
 
         const normalized = normalizeReceiptPayload(req.body, { existing });
         stripPremiumDocumentFooter(normalized, await isUserPremium(req.user.userId));
+        await applyClientSnapshot(normalized, req.user.userId, existing);
         if (isFinalizingReceiptDraft(existing, normalized)) {
             await reserveInvoiceCreation(req.user.userId);
             reserved = true;

@@ -28,6 +28,8 @@ export const DEFAULT_QUOTATION_TERMS = [
 
 const ALLOWED_QUOTATION_FIELDS = [
     'clientId',
+    'clientName',
+    'clientCompany',
     'date',
     'validUntil',
     'items',
@@ -93,6 +95,13 @@ export function sanitizeQuotationPayload(body) {
             throw validationError('Invalid client ID.');
         }
         data.clientId = String(data.clientId);
+    }
+
+    if (data.clientName !== undefined) {
+        data.clientName = sanitizePlainText(data.clientName, 200) || null;
+    }
+    if (data.clientCompany !== undefined) {
+        data.clientCompany = sanitizePlainText(data.clientCompany, 200) || null;
     }
 
     if (data.status !== undefined && !STATUSES.includes(data.status)) {

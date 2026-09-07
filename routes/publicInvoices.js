@@ -167,7 +167,11 @@ router.get('/invoices/:token', asyncHandler(async (req, res) => {
 
     res.json({
         invoice: sanitizePublicInvoice(invoice),
-        client: sanitizePublicClient(client),
+        client: sanitizePublicClient(client || (
+            invoice.clientName || invoice.clientCompany
+                ? { name: invoice.clientName, company: invoice.clientCompany }
+                : null
+        )),
         business: sanitizePublicBusiness(businessInfo),
     });
 }));
@@ -208,7 +212,11 @@ router.get('/quotations/:token', asyncHandler(async (req, res) => {
 
     res.json({
         quotation: sanitizePublicQuotation(quotation),
-        client: sanitizePublicClient(client),
+        client: sanitizePublicClient(client || (
+            quotation.clientName || quotation.clientCompany
+                ? { name: quotation.clientName, company: quotation.clientCompany }
+                : null
+        )),
         business: sanitizePublicBusiness(businessInfo),
     });
 }));

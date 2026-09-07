@@ -48,6 +48,8 @@ import {
 import { countListSummary, buildSummaryResponse, resolveListSummaryOptions, isSummaryOnlyRequest, shouldFetchListSummary } from '../utils/listSummary.js';
 import { getListPeriodMongoFilter } from '../utils/listMonthFilter.js';
 import { sendQuotationListExport } from '../utils/quotationListExport.js';
+import { applyClientSnapshot, DOCUMENT_CLIENT_SEARCH_FIELDS } from '../utils/clientSnapshot.js';
+import { attachClientNamesToDocuments, attachClientNamesToDocument } from '../utils/attachClientNames.js';
 
 const router = express.Router();
 
@@ -65,32 +67,7 @@ function toUserObjectId(userId) {
 }
 
 async function attachClientNames(quotations, userId) {
-    const clientIds = [
-        ...new Set(
-            quotations
-                .map((q) => q.clientId)
-                .filter(Boolean)
-                .map((id) => String(id))
-        ),
-    ];
-    if (clientIds.length === 0) {
-        return quotations.map((q) => ({ ...q, clientName: null }));
-    }
-    const clients = await Client.find({
-        userId,
-        _id: { $in: clientIds },
-    })
-        .select('name company')
-        .lean();
-    const byId = new Map(clients.map((c) => [String(c._id), c]));
-    return quotations.map((q) => {
-        const client = q.clientId ? byId.get(String(q.clientId)) : null;
-        return {
-            ...q,
-            clientName: client?.name || null,
-            clientCompany: client?.company || null,
-        };
-    });
+    return attachClientNamesToDocuments(quotations, userId);
 }
 
 async function getQuotationStatusCounts(userId, extraMatch = {}) {
@@ -184,7 +161,7 @@ router.get('/', auth, asyncHandler(async (req, res) => {
 
     if (search) {
         const clientIds = await resolveSearchClientIds(userId, search);
-        const textFilter = buildSearchFilter(search, ['quotationNumber']);
+        const textFilter = buildSearchFilter(search, ['quotationNumber', ...DOCUMENT_CLIENT_SEARCH_FIELDS]);
         const or = [...(textFilter?.$or || [])];
         if (clientIds.length > 0) {
             or.push({ clientId: { $in: clientIds } });
@@ -231,7 +208,7 @@ router.get('/drafts', auth, asyncHandler(async (req, res) => {
     const filter = { userId, status: 'draft' };
     if (search) {
         const clientIds = await resolveSearchClientIds(userId, search);
-        const textFilter = buildSearchFilter(search, ['quotationNumber']);
+        const textFilter = buildSearchFilter(search, ['quotationNumber', ...DOCUMENT_CLIENT_SEARCH_FIELDS]);
         const or = [...(textFilter?.$or || [])];
         if (clientIds.length > 0) {
             or.push({ clientId: { $in: clientIds } });
@@ -266,6 +243,7 @@ router.post('/', auth, requireEmailVerified, async (req, res) => {
         }
         const normalized = normalizeQuotationPayload(req.body, { isCreate: true });
         stripPremiumDocumentFooter(normalized, await isUserPremium(req.user.userId));
+        await applyClientSnapshot(normalized, req.user.userId);
         const payload = await assignQuotationNumber(normalized, null, req.user.userId);
         attachQuotationPublicTokenIfNeeded(payload);
         const quotation = await Quotation.create({
@@ -301,7 +279,7 @@ router.get('/:id', auth, validateObjectId(), asyncHandler(async (req, res) => {
         userId: req.user.userId,
     });
     if (!quotation) return res.status(404).json({ message: 'Quotation not found' });
-    res.json(quotation);
+    res.json(await attachClientNamesToDocument(quotation, req.user.userId));
 }));
 
 router.put('/:id', auth, requireEmailVerified, validateObjectId(), async (req, res) => {
@@ -315,6 +293,7 @@ router.put('/:id', auth, requireEmailVerified, validateObjectId(), async (req, r
 
         const normalized = normalizeQuotationPayload(req.body, { existing });
         stripPremiumDocumentFooter(normalized, await isUserPremium(req.user.userId));
+        await applyClientSnapshot(normalized, req.user.userId, existing);
         if (isFinalizingDraft(existing, normalized)) {
             await reserveInvoiceCreation(req.user.userId);
             reserved = true;
@@ -422,9 +401,11 @@ router.post('/:id/convert', auth, requireEmailVerified, validateObjectId(), asyn
         const invoiceNumber = await getNextInvoiceNumber(req.user.userId);
         const today = new Date().toISOString().slice(0, 10);
 
-        const invoice = await Invoice.create({
+        const invoicePayload = {
             userId: req.user.userId,
             clientId: quotation.clientId,
+            clientName: quotation.clientName || null,
+            clientCompany: quotation.clientCompany || null,
             invoiceNumber,
             date: today,
             dueDate: quotation.validUntil || null,
@@ -448,7 +429,9 @@ router.post('/:id/convert', auth, requireEmailVerified, validateObjectId(), asyn
             tax: quotation.tax ?? 0,
             total: quotation.total ?? 0,
             sourceQuotationId: quotation._id,
-        });
+        };
+        await applyClientSnapshot(invoicePayload, req.user.userId);
+        const invoice = await Invoice.create(invoicePayload);
 
         const tokenPayload = { status: 'pending' };
         attachPublicTokenIfNeeded(tokenPayload);

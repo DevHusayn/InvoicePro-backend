@@ -3,6 +3,9 @@ import mongoose from 'mongoose';
 const invoiceSchema = new mongoose.Schema({
     userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     clientId: { type: mongoose.Schema.Types.ObjectId, ref: 'Client', required: false, default: null },
+    /** Last known bill-to name; kept if the client record is later deleted. */
+    clientName: { type: String, default: null },
+    clientCompany: { type: String, default: null },
     /** invoice = bill for payment; receipt = standalone payment record (no invoice). */
     documentType: {
         type: String,

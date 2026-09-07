@@ -49,7 +49,7 @@ export async function buildInvoiceListFilter(userId, query = {}) {
     }
     if (search) {
         const clientIds = await resolveInvoiceSearchClientIds(userId, search);
-        const textFilter = buildSearchFilter(search, ['invoiceNumber', 'receiptNumber']);
+        const textFilter = buildSearchFilter(search, ['invoiceNumber', 'receiptNumber', 'clientName', 'clientCompany']);
         const or = [...(textFilter?.$or || [])];
         if (clientIds.length > 0) {
             or.push({ clientId: { $in: clientIds } });

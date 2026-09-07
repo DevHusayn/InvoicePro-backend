@@ -143,7 +143,7 @@ export function buildMonthlyStatement({
             const business = getClientBusiness(client);
             byClientId[clientId] = {
                 clientId,
-                clientName: client?.name || 'Unknown client',
+                clientName: client?.name || doc.clientName || 'Unknown client',
                 clientSubtitle: business || client?.email || '',
                 ...emptyBucketTotals(),
                 total: 0,

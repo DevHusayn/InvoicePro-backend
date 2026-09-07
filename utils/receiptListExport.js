@@ -55,7 +55,7 @@ async function mergeReceiptSearchFilter(filter, userId, search) {
     if (!q) return filter;
 
     const clientIds = await resolveSearchClientIds(userId, q);
-    const textFilter = buildSearchFilter(q, ['receiptNumber']);
+    const textFilter = buildSearchFilter(q, ['receiptNumber', 'clientName', 'clientCompany']);
     const or = [...(textFilter?.$or || [])];
     if (clientIds.length > 0) {
         or.push({ clientId: { $in: clientIds } });

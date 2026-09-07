@@ -48,7 +48,7 @@ export async function buildQuotationListFilter(userId, query = {}) {
     }
     if (search) {
         const clientIds = await resolveSearchClientIds(userId, search);
-        const textFilter = buildSearchFilter(search, ['quotationNumber']);
+        const textFilter = buildSearchFilter(search, ['quotationNumber', 'clientName', 'clientCompany']);
         const or = [...(textFilter?.$or || [])];
         if (clientIds.length > 0) {
             or.push({ clientId: { $in: clientIds } });

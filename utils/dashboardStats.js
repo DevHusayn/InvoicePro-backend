@@ -113,7 +113,7 @@ async function attachClientNames(docs) {
         const clientId = doc.clientId?.toString?.() || doc.clientId || null;
         return {
             ...mapped,
-            clientName: clientId ? nameById[clientId] || 'Unknown Client' : 'Unknown Client',
+            clientName: nameById[clientId] || doc.clientName || 'Unknown Client',
         };
     });
 }

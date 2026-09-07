@@ -74,6 +74,8 @@ import {
 import { snapshotItemUnitCosts } from '../utils/itemCostSnapshot.js';
 import { isUserPremium } from '../utils/premiumAccess.js';
 import { stoppedRecurringFields } from '../utils/recurrence.js';
+import { applyClientSnapshot, DOCUMENT_CLIENT_SEARCH_FIELDS } from '../utils/clientSnapshot.js';
+import { attachClientNamesToDocuments, attachClientNamesToDocument } from '../utils/attachClientNames.js';
 
 const router = express.Router();
 
@@ -104,32 +106,7 @@ function toUserObjectId(userId) {
 }
 
 async function attachClientNames(invoices, userId) {
-    const clientIds = [
-        ...new Set(
-            invoices
-                .map((inv) => inv.clientId)
-                .filter(Boolean)
-                .map((id) => String(id))
-        ),
-    ];
-    if (clientIds.length === 0) {
-        return invoices.map((inv) => ({ ...inv, clientName: null }));
-    }
-    const clients = await Client.find({
-        userId,
-        _id: { $in: clientIds },
-    })
-        .select('name company')
-        .lean();
-    const byId = new Map(clients.map((c) => [String(c._id), c]));
-    return invoices.map((inv) => {
-        const client = inv.clientId ? byId.get(String(inv.clientId)) : null;
-        return {
-            ...inv,
-            clientName: client?.name || null,
-            clientCompany: client?.company || null,
-        };
-    });
+    return attachClientNamesToDocuments(invoices, userId);
 }
 
 async function resolveInvoiceSearchClientIds(userId, search) {
@@ -204,6 +181,7 @@ router.get('/', auth, asyncHandler(async (req, res) => {
         const textFilter = buildSearchFilter(search, [
             'invoiceNumber',
             'receiptNumber',
+            ...DOCUMENT_CLIENT_SEARCH_FIELDS,
         ]);
         const or = [...(textFilter?.$or || [])];
         if (clientIds.length > 0) {
@@ -254,7 +232,11 @@ router.get('/drafts', auth, asyncHandler(async (req, res) => {
     const filter = { userId, status: 'draft', ...INVOICE_ONLY_FILTER };
     if (search) {
         const clientIds = await resolveInvoiceSearchClientIds(userId, search);
-        const textFilter = buildSearchFilter(search, ['invoiceNumber', 'receiptNumber']);
+        const textFilter = buildSearchFilter(search, [
+            'invoiceNumber',
+            'receiptNumber',
+            ...DOCUMENT_CLIENT_SEARCH_FIELDS,
+        ]);
         const or = [...(textFilter?.$or || [])];
         if (clientIds.length > 0) {
             or.push({ clientId: { $in: clientIds } });
@@ -310,6 +292,7 @@ router.post('/', auth, requireEmailVerified, async (req, res) => {
         }
         const normalized = normalizeInvoicePayload(req.body, { isCreate: true });
         stripPremiumDocumentFooter(normalized, await isUserPremium(req.user.userId));
+        await applyClientSnapshot(normalized, req.user.userId);
         const payload = await assignDocumentNumbers(
             normalized,
             null,
@@ -376,7 +359,7 @@ router.get('/:id', auth, validateObjectId(), asyncHandler(async (req, res) => {
         await invoice.save();
     }
 
-    res.json(invoice);
+    res.json(await attachClientNamesToDocument(invoice, req.user.userId));
 }));
 
 // Record an installment payment (partial or full)
@@ -430,6 +413,7 @@ router.put('/:id', auth, requireEmailVerified, validateObjectId(), async (req, r
 
         const normalized = normalizeInvoicePayload(req.body, { existing });
         stripPremiumDocumentFooter(normalized, await isUserPremium(req.user.userId));
+        await applyClientSnapshot(normalized, req.user.userId, existing);
         if (isFinalizingDraft(existing, normalized)) {
             await reserveInvoiceCreation(req.user.userId);
             reserved = true;

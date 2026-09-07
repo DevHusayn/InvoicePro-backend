@@ -13,6 +13,7 @@ import {
     shouldGenerateRecurrence,
 } from './recurrence.js';
 import { INVOICE_ONLY_FILTER } from './invoiceDocumentFilter.js';
+import { applyClientSnapshot } from './clientSnapshot.js';
 
 function cloneLineItems(items) {
     if (!Array.isArray(items)) return [];
@@ -33,6 +34,8 @@ export function buildRecurringInvoiceChildPayload(template) {
     return {
         userId: template.userId,
         clientId: template.clientId || null,
+        clientName: template.clientName || null,
+        clientCompany: template.clientCompany || null,
         documentType: 'invoice',
         date,
         dueDate,
@@ -111,6 +114,7 @@ export async function generateRecurringInvoices(now = new Date()) {
 
         const payload = buildRecurringInvoiceChildPayload(template);
         try {
+            await applyClientSnapshot(payload, template.userId, template);
             const numbered = await assignDocumentNumbers(
                 payload,
                 null,

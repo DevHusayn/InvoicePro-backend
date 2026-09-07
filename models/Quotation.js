@@ -9,6 +9,9 @@ const quotationSchema = new mongoose.Schema(
             required: false,
             default: null,
         },
+        /** Last known bill-to name; kept if the client record is later deleted. */
+        clientName: { type: String, default: null },
+        clientCompany: { type: String, default: null },
         quotationNumber: String,
         publicToken: { type: String, unique: true, sparse: true, index: true },
         date: String,

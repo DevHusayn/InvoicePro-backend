@@ -28,6 +28,8 @@ const TOTAL_FIELDS = [
 ];
 const ALLOWED_INVOICE_FIELDS = [
     'clientId',
+    'clientName',
+    'clientCompany',
     'date',
     'dueDate',
     'items',
@@ -97,6 +99,13 @@ export function sanitizeInvoicePayload(body) {
             throw validationError('Invalid client ID.');
         }
         data.clientId = String(data.clientId);
+    }
+
+    if (data.clientName !== undefined) {
+        data.clientName = sanitizePlainText(data.clientName, 200) || null;
+    }
+    if (data.clientCompany !== undefined) {
+        data.clientCompany = sanitizePlainText(data.clientCompany, 200) || null;
     }
 
     if (data.status !== undefined && !STATUSES.includes(data.status)) {

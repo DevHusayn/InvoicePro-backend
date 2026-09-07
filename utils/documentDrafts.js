@@ -4,6 +4,8 @@ import Quotation from '../models/Quotation.js';
 import Client from '../models/Client.js';
 import { buildSearchFilter, escapeRegex } from './pagination.js';
 import { INVOICE_ONLY_FILTER, RECEIPT_ONLY_FILTER } from './invoiceDocumentFilter.js';
+import { DOCUMENT_CLIENT_SEARCH_FIELDS } from './clientSnapshot.js';
+import { attachClientNamesToDocuments } from './attachClientNames.js';
 
 function toUserObjectId(userId) {
     if (userId instanceof mongoose.Types.ObjectId) return userId;
@@ -24,39 +26,14 @@ async function resolveSearchClientIds(userId, search) {
 }
 
 async function attachClientNames(docs, userId) {
-    const clientIds = [
-        ...new Set(
-            docs
-                .map((d) => d.clientId)
-                .filter(Boolean)
-                .map((id) => String(id))
-        ),
-    ];
-    if (clientIds.length === 0) {
-        return docs.map((d) => ({ ...d, clientName: null, clientCompany: null }));
-    }
-    const clients = await Client.find({
-        userId,
-        _id: { $in: clientIds },
-    })
-        .select('name company')
-        .lean();
-    const byId = new Map(clients.map((c) => [String(c._id), c]));
-    return docs.map((d) => {
-        const client = d.clientId ? byId.get(String(d.clientId)) : null;
-        return {
-            ...d,
-            clientName: client?.name || null,
-            clientCompany: client?.company || null,
-        };
-    });
+    return attachClientNamesToDocuments(docs, userId);
 }
 
 function buildDraftFilter(userId, search, clientIds, numberFields, extra = {}) {
     const filter = { userId, status: 'draft', ...extra };
     if (!search) return filter;
 
-    const textFilter = buildSearchFilter(search, numberFields);
+    const textFilter = buildSearchFilter(search, [...numberFields, ...DOCUMENT_CLIENT_SEARCH_FIELDS]);
     const or = [...(textFilter?.$or || [])];
     if (clientIds.length > 0) {
         or.push({ clientId: { $in: clientIds } });
