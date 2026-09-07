@@ -35,6 +35,8 @@ export {
     sendPremiumExpiryReminderEmail,
     sendLowStockAlertEmail,
     sendMonthlyStatementEmail,
+    sendAdminMessageEmail,
+    renderAdminMessageEmail,
 } from './senders/index.js';
 
 export {

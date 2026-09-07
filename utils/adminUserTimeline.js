@@ -22,6 +22,7 @@ const TYPE_LABELS = {
     payment_failed: 'Payment failed',
     invoice_created: 'Invoice created',
     quotation_created: 'Quotation created',
+    admin_email_sent: 'Email sent by admin',
 };
 
 function formatPaymentEvent(payment) {

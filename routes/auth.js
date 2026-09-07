@@ -20,7 +20,14 @@ import {
     getInvoiceUsageMapForUsers,
     resetFreeInvoiceUsageForUser,
 } from '../utils/invoiceLimits.js';
-import { sendPasswordResetEmail, getEmailErrorMessage, PASSWORD_RESET_EXPIRY_MINUTES, sendEmailVerificationEmail } from '../src/emails/index.js';
+import {
+    sendPasswordResetEmail,
+    getEmailErrorMessage,
+    PASSWORD_RESET_EXPIRY_MINUTES,
+    sendEmailVerificationEmail,
+    sendAdminMessageEmail,
+    renderAdminMessageEmail,
+} from '../src/emails/index.js';
 import {
     sendOAuthSignupEmails,
     sendRegistrationEmails,
@@ -37,6 +44,7 @@ import {
     registerLimiter,
     forgotPasswordLimiter,
     resetPasswordLimiter,
+    adminEmailLimiter,
 } from '../middleware/rateLimits.js';
 import {
     sanitizePlainText,
@@ -59,6 +67,7 @@ import Quotation from '../models/Quotation.js';
 import Product from '../models/Product.js';
 import Payment from '../models/Payment.js';
 import AdminNote from '../models/AdminNote.js';
+import UserActivityLog from '../models/UserActivityLog.js';
 import { buildUserTimeline, buildSubscriptionHistory } from '../utils/adminUserTimeline.js';
 import {
     parseAdminUserFilters,
@@ -75,7 +84,13 @@ import {
     logUserSuspended,
     logUserReactivated,
     logPlanChange,
+    logAdminEmailSent,
 } from '../utils/userActivityLog.js';
+import {
+    listAdminMessageActionOptions,
+    listAdminMessageSenderOptions,
+    parseAdminMessageInput,
+} from '../src/emails/helpers/adminMessage.js';
 
 const router = express.Router();
 
@@ -963,6 +978,158 @@ router.patch('/admin/users/:id/notes/:noteId', auth, requireAdmin, validateObjec
             },
         });
     } catch (err) {
+        return sendServerError(res, err);
+    }
+});
+
+// Admin: sent message history for a user
+router.get('/admin/users/:id/emails', auth, requireAdmin, validateObjectId(), async (req, res) => {
+    try {
+        const user = await User.findById(req.params.id).select('_id').lean();
+        if (!user) return res.status(404).json({ message: 'User not found' });
+
+        const { page, limit, skip } = parsePagination(req, { defaultLimit: 10 });
+        const filter = { userId: req.params.id, type: 'admin_email_sent' };
+        const { data, total } = await paginateFind(UserActivityLog, filter, {
+            skip,
+            limit,
+            sort: { createdAt: -1 },
+            lean: true,
+        });
+
+        const actorIds = [...new Set(data.map((log) => log.actorId).filter(Boolean).map(String))];
+        const actors = actorIds.length
+            ? await User.find({ _id: { $in: actorIds } }).select('name email').lean()
+            : [];
+        const nameById = new Map(
+            actors.map((actor) => [String(actor._id), actor.name || actor.email || 'Admin'])
+        );
+
+        res.set('Cache-Control', 'no-store');
+        res.json({
+            data: data.map((log) => ({
+                id: String(log._id),
+                subject: log.meta?.subject || (log.description || '').replace(/^Subject:\s*/, '') || 'Email',
+                preview: log.meta?.preview || '',
+                body: log.meta?.body || '',
+                from: log.meta?.from || '',
+                replyTo: log.meta?.replyTo || null,
+                fromName: log.meta?.fromName || '',
+                fromPreset: log.meta?.fromPreset || '',
+                to: log.meta?.to || '',
+                actionLabel: log.meta?.actionLabel || '',
+                actionUrl: log.meta?.actionUrl || '',
+                authorName: log.actorId ? nameById.get(String(log.actorId)) || 'Admin' : 'Admin',
+                createdAt: log.createdAt,
+            })),
+            pagination: buildPaginationMeta(page, limit, total),
+        });
+    } catch (err) {
+        return sendServerError(res, err);
+    }
+});
+
+// Admin: sender presets for in-app user email
+router.get('/admin/email-options', auth, requireAdmin, (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    res.json({
+        presets: listAdminMessageSenderOptions(),
+        actions: listAdminMessageActionOptions(),
+    });
+});
+
+// Admin: preview a message to a user
+router.post('/admin/users/:id/email/preview', auth, requireAdmin, validateObjectId(), async (req, res) => {
+    try {
+        const user = await User.findById(req.params.id).select('name email').lean();
+        if (!user) return res.status(404).json({ message: 'User not found' });
+        if (!user.email) {
+            return res.status(400).json({ message: 'This user does not have an email address.' });
+        }
+
+        const payload = parseAdminMessageInput(req.body);
+        const rendered = await renderAdminMessageEmail({
+            userName: user.name,
+            preview: payload.preview,
+            body: payload.body,
+            noReply: payload.fromPreset === 'noreply',
+            actionUrl: payload.actionUrl,
+            actionLabel: payload.actionLabel,
+        });
+
+        res.json({
+            html: rendered.html,
+            text: rendered.text,
+            subject: payload.subject,
+            preview: payload.preview,
+            from: payload.from,
+            replyTo: payload.replyTo || null,
+            to: user.email,
+            actionUrl: payload.actionUrl || '',
+            actionLabel: payload.actionLabel || '',
+        });
+    } catch (err) {
+        if (err.status === 400) {
+            return res.status(400).json({ message: err.message });
+        }
+        return sendServerError(res, err);
+    }
+});
+
+// Admin: send a message to a user
+router.post('/admin/users/:id/email', auth, requireAdmin, validateObjectId(), adminEmailLimiter, async (req, res) => {
+    try {
+        const user = await User.findById(req.params.id).select('name email').lean();
+        if (!user) return res.status(404).json({ message: 'User not found' });
+        if (!user.email) {
+            return res.status(400).json({ message: 'This user does not have an email address.' });
+        }
+
+        const payload = parseAdminMessageInput(req.body);
+
+        try {
+            await sendAdminMessageEmail({
+                to: user.email,
+                userName: user.name,
+                subject: payload.subject,
+                preview: payload.preview,
+                body: payload.body,
+                from: payload.from,
+                replyTo: payload.replyTo,
+                fromPreset: payload.fromPreset,
+                actionUrl: payload.actionUrl,
+                actionLabel: payload.actionLabel,
+            });
+        } catch (mailErr) {
+            console.error('Admin-user email error:', mailErr);
+            return res.status(503).json({ message: getEmailErrorMessage(mailErr) });
+        }
+
+        await logAdminEmailSent(user._id, req.user.userId, {
+            subject: payload.subject,
+            preview: payload.preview,
+            body: payload.body,
+            from: payload.from,
+            replyTo: payload.replyTo,
+            fromName: payload.fromName,
+            fromPreset: payload.fromPreset,
+            to: user.email,
+            actionPreset: payload.actionPreset,
+            actionLabel: payload.actionLabel,
+            actionUrl: payload.actionUrl,
+        });
+
+        res.json({
+            message: `Email sent to ${user.email}`,
+            to: user.email,
+            subject: payload.subject,
+            from: payload.from,
+            replyTo: payload.replyTo || null,
+        });
+    } catch (err) {
+        if (err.status === 400) {
+            return res.status(400).json({ message: err.message });
+        }
         return sendServerError(res, err);
     }
 });

@@ -134,6 +134,13 @@ export const forgotPasswordLimiter = buildLimiter({
     ipOnly: true,
 });
 
+export const adminEmailLimiter = buildLimiter({
+    windowMs: ONE_HOUR,
+    max: 20,
+    message: 'Too many admin emails. Please try again later.',
+    prefix: 'admin-email',
+});
+
 export const resetPasswordLimiter = buildLimiter({
     windowMs: ONE_HOUR,
     max: 10,

@@ -51,6 +51,11 @@ export function getSupportEmail() {
     return process.env.EMAIL_SUPPORT?.trim() || 'support@mywaraqah.com';
 }
 
+/** Admin no-reply mailbox on the verified root domain. */
+export function getNoReplyEmail() {
+    return process.env.EMAIL_NOREPLY?.trim() || 'noreply@mywaraqah.com';
+}
+
 /** Inbox for platform ops alerts (e.g. new signups). Falls back to support email. */
 export function getAdminNotifyEmail() {
     return process.env.ADMIN_EMAIL?.trim() || getSupportEmail();

@@ -10,6 +10,7 @@ const ACTIVITY_TYPES = [
     'subscription_payment_failed',
     'payment_success',
     'payment_failed',
+    'admin_email_sent',
 ];
 
 const userActivityLogSchema = new mongoose.Schema(
@@ -25,6 +26,7 @@ const userActivityLogSchema = new mongoose.Schema(
 );
 
 userActivityLogSchema.index({ userId: 1, createdAt: -1 });
+userActivityLogSchema.index({ userId: 1, type: 1, createdAt: -1 });
 
 export { ACTIVITY_TYPES };
 export default mongoose.model('UserActivityLog', userActivityLogSchema);

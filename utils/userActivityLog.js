@@ -58,6 +58,39 @@ export async function logSubscriptionCancelled(userId, { billingInterval = null 
     });
 }
 
+export async function logAdminEmailSent(userId, actorId, {
+    subject,
+    preview,
+    body,
+    from,
+    replyTo,
+    fromName,
+    fromPreset,
+    to,
+    actionPreset,
+    actionLabel,
+    actionUrl,
+} = {}) {
+    await logUserActivity(userId, 'admin_email_sent', {
+        title: 'Email sent by admin',
+        description: subject ? `Subject: ${subject}` : 'Admin sent an email',
+        meta: {
+            subject: subject || '',
+            preview: preview || '',
+            body: body || '',
+            from: from || '',
+            replyTo: replyTo || null,
+            fromName: fromName || '',
+            fromPreset: fromPreset || '',
+            to: to || '',
+            actionPreset: actionPreset || 'none',
+            actionLabel: actionLabel || '',
+            actionUrl: actionUrl || '',
+        },
+        actorId,
+    });
+}
+
 export async function logSubscriptionPaymentFailed(userId) {
     await logUserActivity(userId, 'subscription_payment_failed', {
         title: 'Subscription payment failed',
