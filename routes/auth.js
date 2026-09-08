@@ -89,6 +89,7 @@ import {
 import {
     listAdminMessageActionOptions,
     listAdminMessageSenderOptions,
+    listAdminMessageTemplates,
     parseAdminMessageInput,
 } from '../src/emails/helpers/adminMessage.js';
 
@@ -1035,6 +1036,7 @@ router.get('/admin/email-options', auth, requireAdmin, (req, res) => {
     res.json({
         presets: listAdminMessageSenderOptions(),
         actions: listAdminMessageActionOptions(),
+        templates: listAdminMessageTemplates(),
     });
 });
 

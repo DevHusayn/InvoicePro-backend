@@ -7,8 +7,10 @@ import {
     resolveAdminMessageSender,
     sanitizeAdminMessageBody,
     splitBodyParagraphs,
+    applyAdminMessageTemplate,
     listAdminMessageActionOptions,
     listAdminMessageSenderOptions,
+    listAdminMessageTemplates,
 } from '../src/emails/helpers/adminMessage.js';
 
 test('splitBodyParagraphs keeps blank-line separated blocks', () => {
@@ -175,6 +177,35 @@ test('parseAdminMessageInput includes a dashboard action by default as none', ()
     });
     assert.equal(parsed.actionPreset, 'none');
     assert.equal(parsed.actionUrl, '');
+});
+
+test('listAdminMessageTemplates includes the follow-up drafts', () => {
+    const ids = listAdminMessageTemplates().map((template) => template.id);
+    assert.deepEqual(ids, [
+        'blank',
+        'we-miss-you',
+        'finish-setup',
+        'try-premium',
+        'billing-help',
+        'need-a-hand',
+    ]);
+});
+
+test('applyAdminMessageTemplate fills we-miss-you and a dashboard button', () => {
+    const applied = applyAdminMessageTemplate('we-miss-you', { firstName: 'Ada Lovelace' });
+    assert.equal(applied.templateId, 'we-miss-you');
+    assert.equal(applied.subject, 'We miss you at Waraqah');
+    assert.equal(applied.actionPreset, 'dashboard');
+    assert.equal(applied.actionLabel, 'Go to dashboard');
+    assert.match(applied.body, /clients, products, and records/);
+});
+
+test('applyAdminMessageTemplate returns an empty blank draft', () => {
+    const applied = applyAdminMessageTemplate('blank');
+    assert.equal(applied.templateId, 'blank');
+    assert.equal(applied.subject, '');
+    assert.equal(applied.body, '');
+    assert.equal(applied.actionPreset, 'none');
 });
 
 test('renderAdminMessageEmail includes an action button', async () => {

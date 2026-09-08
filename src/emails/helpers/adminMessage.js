@@ -24,7 +24,88 @@ export const ADMIN_MESSAGE_ACTIONS = [
     { id: 'custom', label: 'Custom Waraqah link', path: null, buttonLabel: 'Open Waraqah' },
 ];
 
+export const ADMIN_MESSAGE_TEMPLATES = [
+    {
+        id: 'blank',
+        label: 'Blank message',
+        subject: '',
+        preview: '',
+        body: '',
+        actionPreset: 'none',
+        actionLabel: '',
+    },
+    {
+        id: 'we-miss-you',
+        label: 'We miss you',
+        subject: 'We miss you at Waraqah',
+        preview: 'Your workspace and records are still here whenever you are ready.',
+        body: [
+            "It's been a while since we last saw you on Waraqah, and we wanted to check in.",
+            'Your clients, products, and records are still saved and ready whenever you are. If something was not working, just reply to this email. We would genuinely like to fix it.',
+            'Looking forward to having you back.',
+            'The Waraqah Team',
+        ].join('\n\n'),
+        actionPreset: 'dashboard',
+        actionLabel: 'Go to dashboard',
+    },
+    {
+        id: 'finish-setup',
+        label: 'Finish setup',
+        subject: 'Your Waraqah workspace is ready',
+        preview: 'Add your first client or product and start using your workspace.',
+        body: [
+            'Your Waraqah workspace is ready, and you can pick up right where you left off.',
+            'Add a client or product, then create a document and send it. Most people are up and running in a few minutes.',
+            'If you get stuck, reply to this email and we will help.',
+            'The Waraqah Team',
+        ].join('\n\n'),
+        actionPreset: 'dashboard',
+        actionLabel: 'Go to dashboard',
+    },
+    {
+        id: 'try-premium',
+        label: 'Try Premium',
+        subject: 'Ready when you are to grow on Waraqah',
+        preview: 'Premium removes the free-plan limits and keeps your records intact.',
+        body: [
+            'If you want more room to grow, branding, or fewer free-plan limits, Premium is ready when you are.',
+            'You can upgrade in a minute and keep all of your existing records.',
+            'Reply if you have any questions about the plan.',
+            'The Waraqah Team',
+        ].join('\n\n'),
+        actionPreset: 'upgrade',
+        actionLabel: 'Upgrade to Premium',
+    },
+    {
+        id: 'billing-help',
+        label: 'Billing help',
+        subject: 'A quick note about your Waraqah billing',
+        preview: 'Review your plan and payment method, or reply and we will help.',
+        body: [
+            'We wanted to make sure everything is okay with your Waraqah billing.',
+            'You can review your plan, payment method, and billing history from Settings. If a charge failed or something looks off, reply to this email and we will sort it out.',
+            'The Waraqah Team',
+        ].join('\n\n'),
+        actionPreset: 'billing',
+        actionLabel: 'Manage billing',
+    },
+    {
+        id: 'need-a-hand',
+        label: 'Need a hand?',
+        subject: 'Need any help with Waraqah?',
+        preview: 'Reply to this email if something is not working or you have a question.',
+        body: [
+            'Just checking in to see if you need any help with Waraqah.',
+            'If something is not working, or you have a question about your workspace, clients, or account, reply to this email. We are happy to help.',
+            'The Waraqah Team',
+        ].join('\n\n'),
+        actionPreset: 'none',
+        actionLabel: '',
+    },
+];
+
 const ACTION_IDS = new Set(ADMIN_MESSAGE_ACTIONS.map((action) => action.id));
+const TEMPLATE_IDS = new Set(ADMIN_MESSAGE_TEMPLATES.map((template) => template.id));
 const SAFE_APP_PATH = /^\/[A-Za-z0-9/_\-.?=&%#]*$/;
 
 const CONTROL_CHARS = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g;
@@ -198,6 +279,37 @@ export function resolveAdminMessageAction(actionPreset = 'none', actionPath = ''
         actionUrl: parsed.toString(),
         actionLabel: label,
         actionPath: raw.slice(0, ADMIN_MESSAGE_ACTION_PATH_MAX),
+    };
+}
+
+function fillTemplateText(value, firstName) {
+    return String(value || '').replace(/\{\{\s*firstName\s*\}\}/g, firstName);
+}
+
+export function listAdminMessageTemplates() {
+    return ADMIN_MESSAGE_TEMPLATES.map((template) => ({
+        id: template.id,
+        label: template.label,
+        subject: template.subject,
+        preview: template.preview,
+        body: template.body,
+        actionPreset: template.actionPreset,
+        actionLabel: template.actionLabel,
+    }));
+}
+
+export function applyAdminMessageTemplate(templateId, { firstName } = {}) {
+    const id = TEMPLATE_IDS.has(templateId) ? templateId : 'blank';
+    const template = ADMIN_MESSAGE_TEMPLATES.find((item) => item.id === id);
+    const name = sanitizePlainText(firstName, 40).split(/\s+/)[0] || 'there';
+
+    return {
+        templateId: id,
+        subject: fillTemplateText(template.subject, name),
+        preview: fillTemplateText(template.preview, name),
+        body: fillTemplateText(template.body, name),
+        actionPreset: template.actionPreset || 'none',
+        actionLabel: template.actionLabel || '',
     };
 }
 
