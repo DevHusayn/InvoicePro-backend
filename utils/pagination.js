@@ -25,8 +25,9 @@ export function buildPaginationMeta(page, limit, total) {
  * Run a paginated find + countDocuments in parallel.
  * @returns {{ data: any[], total: number }}
  */
-export async function paginateFind(Model, filter, { skip, limit, sort, select, lean = true } = {}) {
+export async function paginateFind(Model, filter, { skip, limit, sort, select, lean = true, collation } = {}) {
     let query = Model.find(filter);
+    if (collation) query = query.collation(collation);
     if (sort) query = query.sort(sort);
     if (select) query = query.select(select);
     query = query.skip(skip).limit(limit);

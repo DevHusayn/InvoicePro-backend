@@ -9,6 +9,7 @@ import {
     assertExportWithinLimit,
     formatListExportDate,
 } from './listExport.js';
+import { CATALOG_LIST_SORT, resolveListSort } from './listSort.js';
 
 export async function buildClientListFilter(userId, query = {}) {
     const filter = { userId };
@@ -37,7 +38,10 @@ export async function exportClientsCsv(userId, query = {}) {
     const total = await Client.countDocuments(filter);
     assertExportWithinLimit(total);
 
-    const data = await Client.find(filter).sort({ name: 1 }).limit(LIST_EXPORT_MAX).lean();
+    const { sort, collation } = resolveListSort(query.sort, CATALOG_LIST_SORT);
+    let findQuery = Client.find(filter).sort(sort).limit(LIST_EXPORT_MAX);
+    if (collation) findQuery = findQuery.collation(collation);
+    const data = await findQuery.lean();
     return {
         csv: clientsToCsv(data),
         filename: await resolveListExportFilename(userId, 'clients', query),

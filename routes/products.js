@@ -23,6 +23,7 @@ import { getProductActivity } from '../utils/productActivity.js';
 import { recordStockMovement } from '../utils/stockLedger.js';
 import { backfillMissingLineCostSnapshots } from '../utils/productCostResolver.js';
 import { invalidateDashboardCache } from '../utils/dashboardStats.js';
+import { PRODUCT_LIST_SORT, resolveListSort } from '../utils/listSort.js';
 
 const router = express.Router();
 
@@ -102,7 +103,7 @@ router.get('/', auth, asyncHandler(async (req, res) => {
         paginateFind(Product, filter, {
             skip,
             limit,
-            sort: { name: 1 },
+            ...resolveListSort(req.query.sort, PRODUCT_LIST_SORT),
             lean: true,
         }),
         includeSummary

@@ -19,6 +19,7 @@ import {
 } from '../utils/listSummary.js';
 import { getListPeriodMongoFilter } from '../utils/listMonthFilter.js';
 import { getSupplierActivity } from '../utils/supplierActivity.js';
+import { CATALOG_LIST_SORT, resolveListSort } from '../utils/listSort.js';
 
 const router = express.Router();
 
@@ -53,7 +54,7 @@ router.get('/', auth, asyncHandler(async (req, res) => {
         paginateFind(Supplier, filter, {
             skip,
             limit,
-            sort: { name: 1 },
+            ...resolveListSort(req.query.sort, CATALOG_LIST_SORT),
             lean: true,
         }),
         includeSummary

@@ -19,6 +19,7 @@ import { getListPeriodMongoFilter } from '../utils/listMonthFilter.js';
 import { getBusinessTimezone, resolveAnalyticsPeriod } from '../utils/timezone.js';
 import { getExpenseSummaryForUser } from '../utils/expenseAnalytics.js';
 import { applyListRecurringAndDateFilter } from '../utils/recurringListFilter.js';
+import { EXPENSE_LIST_SORT, resolveListSort } from '../utils/listSort.js';
 
 const router = express.Router();
 
@@ -49,7 +50,7 @@ router.get('/', auth, asyncHandler(async (req, res) => {
     const { data, total } = await paginateFind(Expense, filter, {
         skip,
         limit,
-        sort: { date: -1, createdAt: -1 },
+        ...resolveListSort(req.query.sort, EXPENSE_LIST_SORT),
         lean: true,
     });
 

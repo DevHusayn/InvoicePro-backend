@@ -14,6 +14,7 @@ import { countListSummary, buildSummaryResponse, resolveListSummaryOptions, isSu
 import { getListPeriodMongoFilter } from '../utils/listMonthFilter.js';
 import { sendClientListExport } from '../utils/clientListExport.js';
 import { getClientActivity } from '../utils/clientActivity.js';
+import { CATALOG_LIST_SORT, resolveListSort } from '../utils/listSort.js';
 
 const router = express.Router();
 
@@ -52,7 +53,7 @@ router.get('/', auth, asyncHandler(async (req, res) => {
         paginateFind(Client, filter, {
             skip,
             limit,
-            sort: { name: 1 },
+            ...resolveListSort(req.query.sort, CATALOG_LIST_SORT),
             lean: true,
         }),
         includeSummary

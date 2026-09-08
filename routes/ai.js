@@ -24,6 +24,7 @@ import {
 import Client from '../models/Client.js';
 import Product from '../models/Product.js';
 import BusinessInfo from '../models/CompanyInfo.js';
+import { NAME_SORT_COLLATION } from '../utils/listSort.js';
 
 const router = express.Router();
 
@@ -54,9 +55,10 @@ router.post(
         await assertAndReserveAiDraft(userId, timeZone);
 
         const [clients, products, businessInfo] = await Promise.all([
-            Client.find({ userId }).select('name company email phone address').sort({ name: 1 }).limit(80).lean(),
+            Client.find({ userId }).select('name company email phone address').collation(NAME_SORT_COLLATION).sort({ name: 1 }).limit(80).lean(),
             Product.find({ userId })
                 .select('name unitPrice trackInventory quantityOnHand')
+                .collation(NAME_SORT_COLLATION)
                 .sort({ name: 1 })
                 .limit(80)
                 .lean(),

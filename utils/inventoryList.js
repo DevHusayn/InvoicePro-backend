@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import Product from '../models/Product.js';
 import StockMovement from '../models/StockMovement.js';
 import { buildSearchFilter, paginateFind, buildPaginationMeta } from './pagination.js';
+import { NAME_SORT_COLLATION } from './listSort.js';
 
 const TRACKED_FILTER = { trackInventory: true };
 
@@ -164,6 +165,7 @@ export async function listInventoryStock(userId, { page, limit, skip, search, st
             skip,
             limit,
             sort: { name: 1 },
+            collation: NAME_SORT_COLLATION,
             select: 'name quantityOnHand unitCost lowStockThreshold trackInventory',
             lean: true,
         }),
