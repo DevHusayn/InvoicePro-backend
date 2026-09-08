@@ -51,9 +51,30 @@ export function getSupportEmail() {
     return process.env.EMAIL_SUPPORT?.trim() || 'support@mywaraqah.com';
 }
 
-/** Admin no-reply mailbox on the verified root domain. */
+/**
+ * Resend only delivers from the verified mail. subdomain.
+ * Apex addresses like support@mywaraqah.com are rewritten to @mail.mywaraqah.com.
+ */
+export function toVerifiedFromEmail(email) {
+    const value = String(email || '').trim();
+    const at = value.lastIndexOf('@');
+    if (at === -1) return value;
+    const local = value.slice(0, at);
+    const domain = value.slice(at + 1).toLowerCase();
+    if (domain === 'mywaraqah.com') {
+        return `${local}@mail.mywaraqah.com`;
+    }
+    return value;
+}
+
+/** Verified From mailbox for admin Support / custom-reply messages. */
+export function getSupportFromEmail() {
+    return toVerifiedFromEmail(process.env.EMAIL_SUPPORT_FROM?.trim() || 'support@mail.mywaraqah.com');
+}
+
+/** Verified From mailbox for admin no-reply messages. */
 export function getNoReplyEmail() {
-    return process.env.EMAIL_NOREPLY?.trim() || 'noreply@mywaraqah.com';
+    return toVerifiedFromEmail(process.env.EMAIL_NOREPLY?.trim() || 'noreply@mail.mywaraqah.com');
 }
 
 /** Inbox for platform ops alerts (e.g. new signups). Falls back to support email. */

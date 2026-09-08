@@ -36,7 +36,12 @@ export default function ClientEmailLayout({ preview, branding, children }) {
     return React.createElement(
         Html,
         null,
-        React.createElement(Head, null, React.createElement(ResponsiveEmailStyles)),
+        React.createElement(
+            Head,
+            null,
+            React.createElement('meta', { name: 'color-scheme', content: 'light' }),
+            React.createElement(ResponsiveEmailStyles),
+        ),
         preview ? React.createElement(Preview, null, preview) : null,
         React.createElement(
             Body,
@@ -96,6 +101,7 @@ export function createClientEmailStyles(brand) {
     return {
         body: {
             backgroundColor: BRAND.background,
+            colorScheme: 'light',
             fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
             margin: 0,
             padding: '32px 16px',

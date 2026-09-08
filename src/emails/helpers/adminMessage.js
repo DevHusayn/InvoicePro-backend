@@ -3,7 +3,7 @@ import {
     sanitizeOptionalEmail,
     sanitizePlainText,
 } from '../../../utils/sanitize.js';
-import { getNoReplyEmail, getSupportEmail, getWebsiteUrl } from '../config.js';
+import { getNoReplyEmail, getSupportEmail, getSupportFromEmail, getWebsiteUrl } from '../config.js';
 
 export const ADMIN_MESSAGE_FROM_PRESETS = ['noreply', 'support', 'custom'];
 export const ADMIN_MESSAGE_SUBJECT_MAX = 200;
@@ -52,7 +52,7 @@ export function splitBodyParagraphs(body) {
 }
 
 export function getSupportFromAddress() {
-    return `Waraqah <${getSupportEmail()}>`;
+    return `Waraqah <${getSupportFromEmail()}>`;
 }
 
 export function getNoReplyFromAddress() {
@@ -89,8 +89,8 @@ export function resolveAdminMessageSender(fromPreset, replyTo = '', fromName = '
         };
     }
 
-    const supportEmail = getSupportEmail();
-    const from = formatFromHeader(personalName || 'Waraqah', supportEmail);
+    const supportInbox = getSupportEmail();
+    const from = formatFromHeader(personalName || 'Waraqah', getSupportFromEmail());
 
     if (preset === 'custom') {
         return {
@@ -101,7 +101,7 @@ export function resolveAdminMessageSender(fromPreset, replyTo = '', fromName = '
 
     return {
         from,
-        replyTo: customReplyTo || supportEmail,
+        replyTo: customReplyTo || supportInbox,
     };
 }
 
@@ -208,21 +208,21 @@ export function listAdminMessageSenderOptions() {
             label: 'No-reply',
             from: getNoReplyFromAddress(),
             requiresReplyTo: false,
-            hint: 'Sent as Waraqah <noreply@mywaraqah.com>. The email tells recipients not to reply.',
+            hint: `Sent as ${getNoReplyFromAddress()}. The email tells recipients not to reply.`,
         },
         {
             id: 'support',
             label: 'Support',
             from: getSupportFromAddress(),
             requiresReplyTo: false,
-            hint: `Replies go to ${getSupportEmail()}. Add a name to show “Haybah from Waraqah”.`,
+            hint: `Sent from ${getSupportFromEmail()}. Replies go to ${getSupportEmail()}.`,
         },
         {
             id: 'custom',
             label: 'Custom reply address',
             from: getSupportFromAddress(),
             requiresReplyTo: true,
-            hint: 'Add a name to show “Haybah from Waraqah”. Replies go to the address you enter.',
+            hint: `Sent from ${getSupportFromEmail()}. Replies go to the address you enter.`,
         },
     ];
 }

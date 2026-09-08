@@ -24,7 +24,7 @@ test('sanitizeAdminMessageBody preserves newlines and strips control chars', () 
 
 test('resolveAdminMessageSender uses verified From for custom reply-to', () => {
     const sender = resolveAdminMessageSender('custom', 'ada@example.com');
-    assert.match(sender.from, /@mywaraqah\.com>/);
+    assert.match(sender.from, /@mail\.mywaraqah\.com>/);
     assert.equal(sender.replyTo, 'ada@example.com');
 });
 
@@ -36,16 +36,28 @@ test('formatFromDisplayName builds Haybah from Waraqah', () => {
 test('resolveAdminMessageSender uses a personal from name', () => {
     const sender = resolveAdminMessageSender('support', '', 'Haybah');
     assert.match(sender.from, /^Haybah from Waraqah </);
-    assert.match(sender.from, /support@mywaraqah\.com>/);
+    assert.match(sender.from, /support@mail\.mywaraqah\.com>/);
+});
+
+test('resolveAdminMessageSender rewrites leftover apex From addresses to mail.', () => {
+    const previousNoreply = process.env.EMAIL_NOREPLY;
+    process.env.EMAIL_NOREPLY = 'noreply@mywaraqah.com';
+    try {
+        const noreply = resolveAdminMessageSender('noreply');
+        assert.equal(noreply.from, 'Waraqah <noreply@mail.mywaraqah.com>');
+    } finally {
+        if (previousNoreply === undefined) delete process.env.EMAIL_NOREPLY;
+        else process.env.EMAIL_NOREPLY = previousNoreply;
+    }
 });
 
 test('resolveAdminMessageSender maps noreply and support presets', () => {
     const noreply = resolveAdminMessageSender('noreply');
-    assert.equal(noreply.from, 'Waraqah <noreply@mywaraqah.com>');
+    assert.equal(noreply.from, 'Waraqah <noreply@mail.mywaraqah.com>');
     assert.equal(noreply.replyTo, undefined);
 
     const support = resolveAdminMessageSender('support');
-    assert.equal(support.from, 'Waraqah <support@mywaraqah.com>');
+    assert.equal(support.from, 'Waraqah <support@mail.mywaraqah.com>');
     assert.equal(support.replyTo, 'support@mywaraqah.com');
 });
 

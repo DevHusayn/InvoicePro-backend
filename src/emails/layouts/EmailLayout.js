@@ -36,6 +36,7 @@ export default function EmailLayout({ preview, children }) {
         React.createElement(
             Head,
             null,
+            React.createElement('meta', { name: 'color-scheme', content: 'light' }),
             React.createElement('link', {
                 rel: 'stylesheet',
                 href: BODONI_MODA_STYLESHEET,
@@ -200,6 +201,7 @@ export const emailStyles = {
 const styles = {
     body: {
         backgroundColor: BRAND.background,
+        colorScheme: 'light',
         fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
         margin: 0,
         padding: '32px 16px',
